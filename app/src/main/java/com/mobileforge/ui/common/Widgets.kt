@@ -35,11 +35,11 @@ import com.mobileforge.ui.theme.MfText
 @Composable
 fun MfButton(
     text: String,
-    onClick: () -> Unit,
     modifier: Modifier = Modifier,
     primary: Boolean = false,
     danger: Boolean = false,
     enabled: Boolean = true,
+    onClick: () -> Unit,
 ) {
     Button(
         onClick = onClick,
