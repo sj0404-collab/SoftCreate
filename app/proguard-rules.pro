@@ -1,4 +1,1 @@
--keepclassmembers class com.mobileforge.AndroidBridge {
-    @android.webkit.JavascriptInterface <methods>;
-}
--keep class com.mobileforge.AndroidBridge { *; }
+# Native Compose build — keep engine entry points for reflection-free runtime.
