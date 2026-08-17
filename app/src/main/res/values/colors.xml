@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="mf_bg">#FF100E15</color>
+    <color name="mf_accent">#FF7C4DFF</color>
+    <color name="mf_status">#FF101114</color>
+    <color name="ic_launcher_background">#FF171520</color>
+</resources>
