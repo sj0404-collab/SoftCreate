@@ -166,8 +166,10 @@ private fun ScenePane(vm: AppViewModel, modifier: Modifier) {
             ) {
                 MfButton("＋ Mesh") { vm.addObject("Mesh") }
                 MfButton("＋ Player") { vm.addObject("Player") }
+                MfButton("＋ Block") { vm.addObject("Block") }
                 MfButton("＋ Coin") { vm.addObject("Coin") }
                 MfButton("＋ Light") { vm.addObject("Light") }
+                MfButton("＋ Camera") { vm.addObject("Camera") }
                 MfButton("Удалить", danger = true) { vm.deleteSelected() }
             }
             Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(8.dp)) {
@@ -203,8 +205,28 @@ private fun Inspector(vm: AppViewModel) {
     MfField(obj.sx.toString(), { setNum(obj.sx, it) { n -> vm.updateSelected { o -> o.sx = n } } }, "sx", numeric = true)
     MfField(obj.sy.toString(), { setNum(obj.sy, it) { n -> vm.updateSelected { o -> o.sy = n } } }, "sy", numeric = true)
     MfField(obj.sz.toString(), { setNum(obj.sz, it) { n -> vm.updateSelected { o -> o.sz = n } } }, "sz", numeric = true)
+    MfField(obj.rx.toString(), { setNum(obj.rx, it) { n -> vm.updateSelected { o -> o.rx = n } } }, "rx", numeric = true)
+    MfField(obj.ry.toString(), { setNum(obj.ry, it) { n -> vm.updateSelected { o -> o.ry = n } } }, "ry", numeric = true)
+    MfField(obj.rz.toString(), { setNum(obj.rz, it) { n -> vm.updateSelected { o -> o.rz = n } } }, "rz", numeric = true)
     MfField(obj.color, { vm.updateSelected { o -> o.color = it } }, "color")
-    MfField(obj.script, { vm.updateSelected { o -> o.script = it } }, "script")
+    MfField(obj.mesh, { vm.updateSelected { o -> o.mesh = it } }, "mesh (Cube/Sphere/…)")
+    MfField(obj.material, { vm.updateSelected { o -> o.material = it } }, "material")
+    MfField(obj.asset, { vm.updateSelected { o -> o.asset = it } }, "model asset")
+    MfField(obj.script, { vm.updateSelected { o -> o.script = it } }, "script (.cs)")
     MfField(obj.speed.toString(), { setNum(obj.speed, it) { n -> vm.updateSelected { o -> o.speed = n } } }, "speed", numeric = true)
+    MfField(obj.mass.toString(), { setNum(obj.mass, it) { n -> vm.updateSelected { o -> o.mass = n } } }, "mass", numeric = true)
+    if (obj.type == "Light") {
+        MfField(obj.lightType, { vm.updateSelected { o -> o.lightType = it } }, "lightType")
+        MfField(obj.intensity.toString(), { setNum(obj.intensity, it) { n -> vm.updateSelected { o -> o.intensity = n } } }, "intensity", numeric = true)
+    }
+    if (obj.type == "Camera") {
+        MfField(obj.fov.toString(), { setNum(obj.fov, it) { n -> vm.updateSelected { o -> o.fov = n } } }, "fov", numeric = true)
+        MfField(obj.near.toString(), { setNum(obj.near, it) { n -> vm.updateSelected { o -> o.near = n } } }, "near", numeric = true)
+        MfField(obj.far.toString(), { setNum(obj.far, it) { n -> vm.updateSelected { o -> o.far = n } } }, "far", numeric = true)
+    }
+    MfField(obj.tag, { vm.updateSelected { o -> o.tag = it } }, "tag")
+    MfField(obj.layer, { vm.updateSelected { o -> o.layer = it } }, "layer")
+    MfField(obj.plugin, { vm.updateSelected { o -> o.plugin = it } }, "plugin")
     MfButton(if (obj.solid) "Solid: ON" else "Solid: OFF") { vm.updateSelected { o -> o.solid = !o.solid } }
+    MfButton(if (obj.enabled) "Enabled: ON" else "Enabled: OFF") { vm.updateSelected { o -> o.enabled = !o.enabled } }
 }

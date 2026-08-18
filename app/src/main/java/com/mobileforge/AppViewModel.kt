@@ -11,23 +11,33 @@ import androidx.lifecycle.viewModelScope
 import com.mobileforge.ai.AiGateway
 import com.mobileforge.ai.AiResult
 import com.mobileforge.ai.Provider
+import com.mobileforge.cloud.GhAccount
+import com.mobileforge.cloud.GhRepo
+import com.mobileforge.cloud.GhRun
+import com.mobileforge.cloud.GitHubService
 import com.mobileforge.engine.Completions
 import com.mobileforge.engine.CsTranspiler
 import com.mobileforge.engine.GameRuntime
 import com.mobileforge.engine.Orbit
 import com.mobileforge.engine.Suggestion
 import com.mobileforge.export.HtmlPreview
+import com.mobileforge.mcp.McpHub
+import com.mobileforge.mcp.McpServer
+import com.mobileforge.mcp.McpTool
+import com.mobileforge.plugins.PluginRegistry
 import com.mobileforge.security.SecretStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
-enum class Section { Projects, Studio, Scenes, Play, Ai, Settings }
+enum class Section { Projects, Studio, Assets, Play, Cloud, Mcp, Ai, Settings }
+enum class AiCommand { Create, Change, Delete, Explain }
 
 data class ProjectItem(val name: String, val type: String)
 data class FileItem(val path: String, val name: String)
 data class ProposalFile(val path: String, val content: String, val previous: String)
+data class PackItem(val path: String, val kind: String)
 
 class AppViewModel(app: Application) : AndroidViewModel(app) {
     private val store = ProjectStore(app)
@@ -36,6 +46,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private val ai = AiGateway(secrets)
     private val prefs: SharedPreferences =
         app.getSharedPreferences("mobileforge.providers", android.content.Context.MODE_PRIVATE)
+    val github = GitHubService(secrets, prefs)
+    private val mcp = McpHub(secrets, prefs, store, scenesStore, github)
 
     var section by mutableStateOf(Section.Projects)
     var toast by mutableStateOf<String?>(null)
@@ -58,9 +70,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     var customEndpoint by mutableStateOf("")
     var customModel by mutableStateOf("")
     var aiEvent by mutableStateOf("ON_UPDATE")
-    var aiLanguage by mutableStateOf("JavaScript")
-    var aiTask by mutableStateOf("Создай компонент движения персонажа и подбор монет.")
-    var aiOut by mutableStateOf("Готов к задаче. Контекст возьмётся из открытого проекта и сцены.")
+    var aiLanguage by mutableStateOf("C#")
+    var aiCommand by mutableStateOf(AiCommand.Create)
+    var aiTask by mutableStateOf("Создай C#-компонент движения игрока и подбора монет. Только код, без продуктовых решений.")
+    var aiOut by mutableStateOf("Вы режиссёр. Нейросеть пишет только код. Apply — только после вашей команды.")
     var aiBusy by mutableStateOf(false)
     var proposal = mutableStateListOf<ProposalFile>()
     var zenKey by mutableStateOf("")
@@ -74,6 +87,26 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     var dialog by mutableStateOf<String?>(null)
     var dialogValue by mutableStateOf("")
     var importText by mutableStateOf("")
+    val console = mutableStateListOf<String>()
+    var pack = mutableStateListOf<PackItem>()
+    var ghAccounts = mutableStateListOf<GhAccount>()
+    var ghRepos = mutableStateListOf<GhRepo>()
+    var ghRuns = mutableStateListOf<GhRun>()
+    var ghLabel by mutableStateOf("work")
+    var ghTokenInput by mutableStateOf("")
+    var newRepoName by mutableStateOf("")
+    var newRepoPrivate by mutableStateOf(true)
+    var boundRepo by mutableStateOf("")
+    var cloudBusy by mutableStateOf(false)
+    var mcpServers = mutableStateListOf<McpServer>()
+    var mcpTools = mutableStateListOf<McpTool>()
+    var mcpTool by mutableStateOf("fs.list")
+    var mcpArgs by mutableStateOf("{}")
+    var mcpOut by mutableStateOf("Локальные MCP-инструменты готовы. Удалённые — HTTPS или 127.0.0.1.")
+    var mcpServerId by mutableStateOf("local")
+    var mcpNewName by mutableStateOf("")
+    var mcpNewUrl by mutableStateOf("https://")
+    var mcpNewToken by mutableStateOf("")
 
     val models: List<String>
         get() {
@@ -89,39 +122,46 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     init {
         refreshProjects()
         refreshProviderFlags()
+        refreshGithub()
+        refreshMcp()
+        refreshPack()
+        boundRepo = prefs.getString("gh_bound_repo", "").orEmpty()
         customEndpoint = prefs.getString("custom_endpoint", "").orEmpty()
         model = prefs.getString("${provider}_model", model).orEmpty().ifBlank { model }
+        log("MobileForge 2.0 — телефон = превью/редактор, сборка = GitHub runner")
     }
 
     fun notify(text: String) {
         toast = text
     }
 
+    fun log(text: String) {
+        console.add(0, text)
+        while (console.size > 200) console.removeAt(console.lastIndex)
+    }
+
     fun go(next: Section) {
-        if (dirty && section == Section.Studio && next != Section.Studio) {
-            notify("Сначала сохраните файл или отмените правки")
-        }
         if (next != Section.Play) runtime?.stop()
         section = next
         when (next) {
             Section.Projects -> refreshProjects()
-            Section.Studio -> {
+            Section.Studio, Section.Assets -> {
                 refreshFiles()
                 refreshScenes()
+                refreshPack()
             }
-            Section.Scenes -> refreshScenes()
             Section.Play -> startPlay()
             Section.Settings -> refreshProviderFlags()
+            Section.Cloud -> refreshGithub()
+            Section.Mcp -> refreshMcp()
             Section.Ai -> {}
         }
     }
 
-    fun back(): Boolean {
-        return when (section) {
-            Section.Play -> { go(Section.Studio); true }
-            Section.Projects -> false
-            else -> { go(Section.Projects); true }
-        }
+    fun back(): Boolean = when (section) {
+        Section.Play -> { go(Section.Studio); true }
+        Section.Projects -> false
+        else -> { go(Section.Projects); true }
     }
 
     fun refreshProjects() {
@@ -141,6 +181,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         refreshScenes()
         scene = scenes.firstOrNull()
         selected = scene?.objects?.firstOrNull()?.name
+        log("Проект открыт: $name")
         notify("Проект: $name")
         go(Section.Studio)
     }
@@ -186,9 +227,30 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun refreshFiles() {
-        val project = current() ?: return
+        val project = current(false) ?: return
         files.clear()
         store.files(project).forEach { files += FileItem(it.relativePath, it.file.name) }
+    }
+
+    fun refreshPack() {
+        pack.clear()
+        runCatching {
+            val am = getApplication<Application>().assets
+            fun walk(prefix: String) {
+                val kids = am.list(prefix) ?: return
+                if (kids.isEmpty() && prefix.contains('.')) {
+                    pack += PackItem(prefix, prefix.substringAfterLast('.'))
+                    return
+                }
+                kids.forEach { name ->
+                    val path = if (prefix.isBlank()) name else "$prefix/$name"
+                    val nested = am.list(path)
+                    if (nested.isNullOrEmpty()) pack += PackItem(path, name.substringAfterLast('.'))
+                    else walk(path)
+                }
+            }
+            walk("StudioPack")
+        }
     }
 
     fun openFile(path: String) {
@@ -212,12 +274,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         editorText = text
         cursor = cursorPos
         dirty = true
-        val (start, prefix) = Completions.prefixAt(text, cursorPos)
+        val prefix = Completions.prefixAt(text, cursorPos).second
         val extras = files.map { it.name.substringBeforeLast('.') } +
             (scene?.objects?.map { it.name } ?: emptyList())
         suggestions.clear()
         if (prefix.length >= 1) suggestions += Completions.suggest(prefix, openPath, extras)
-        if (start == cursorPos) suggestions.clear()
     }
 
     fun applySuggestion(item: Suggestion) {
@@ -247,9 +308,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun createFile(path: String) {
         val project = current() ?: return
         val seed = when {
+            path.endsWith(".cs") -> "using MobileForge;\npublic class Component : ForgeBehaviour {\n    public float speed = 6f;\n    void Start() { }\n    void Update() {\n        // director writes intent, AI writes code\n    }\n}\n"
             path.endsWith(".js") -> "function onUpdate(api, dt) {\n  \n}\n"
-            path.endsWith(".cs") -> "public class Component {\n    void Update() {\n        \n    }\n}\n"
             path.endsWith(".json") -> "{\n  \n}\n"
+            path.endsWith(".mat") -> "{\n  \"shader\": \"standard\",\n  \"color\": \"#b69cff\",\n  \"metallic\": 0.0,\n  \"smoothness\": 0.5\n}\n"
             else -> "// $path\n"
         }
         store.createFile(project, path, seed).fold(
@@ -273,7 +335,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun refreshScenes() {
-        val project = current() ?: return
+        val project = current(false) ?: return
         scenes.clear()
         scenes += scenesStore.scenes(project)
         if (scene == null) scene = scenes.firstOrNull()
@@ -304,7 +366,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun persistScene(show: Boolean = false) {
-        val project = current() ?: return
+        current(false) ?: return
         val currentScene = scene ?: return
         scenesStore.save(currentScene)
         if (openPath == "Scenes/${currentScene.name}.scene.json") {
@@ -333,19 +395,24 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         currentScene.objects += SceneObject(
             name = name,
             type = type,
-            x = if (type == "Ground") 0f else 2f,
+            x = if (type == "Ground" || type == "Plane") 0f else 2f,
             y = if (type == "Camera") 5f else 1f,
             z = if (type == "Camera") 10f else 0f,
             color = when (type) {
                 "Coin" -> "#f4c95d"
                 "Enemy" -> "#ffb2c8"
                 "Light" -> "#fff4cc"
+                "Block" -> "#6ea8fe"
                 else -> "#b69cff"
             },
             solid = type != "Camera" && type != "Light" && type != "Coin",
+            mesh = SceneObject.defaultMesh(type),
+            script = if (type == "Player") "Scripts/Player.cs" else "",
+            lightType = if (type == "Light") "Directional" else "Directional",
         )
         selected = name
         persistScene(true)
+        log("Добавлен $type $name")
     }
 
     fun deleteSelected() {
@@ -356,20 +423,19 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun startPlay() {
-        val project = current() ?: return notify("Нет проекта").let {}
+        val project = current() ?: return
         if (scene == null) refreshScenes()
         val currentScene = scene ?: scenes.firstOrNull() ?: return notify("Нет сцены")
         val scripts = HashMap<String, String>()
         currentScene.objects.forEach { obj ->
             if (obj.script.isNotBlank()) {
-                runCatching {
-                    scripts[obj.script] = store.resolve(project, obj.script).readText()
-                }
+                runCatching { scripts[obj.script] = store.resolve(project, obj.script).readText() }
             }
         }
         runtime?.stop()
         runtime = GameRuntime(currentScene, scripts).also { it.start() }
         section = Section.Play
+        log("Play preview (локально, без сборки на телефоне)")
     }
 
     fun tickPlay(dt: Float) {
@@ -381,17 +447,16 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun generateAi() {
-        if (aiTask.isBlank()) return notify("Опишите задачу")
+        if (aiTask.isBlank()) return notify("Сформулируйте приказ")
         aiBusy = true
-        aiOut = "Генерация…"
+        aiOut = "Пишу только код по вашей команде…"
         val prompt = buildPrompt()
         val endpoint = customEndpoint
         val chosen = customModel.ifBlank { model }
         viewModelScope.launch {
             val result = withContext(Dispatchers.IO) {
-                runCatching {
-                    ai.send(Provider.fromId(provider), chosen, prompt, endpoint)
-                }.getOrElse { AiResult.Failure(it.message ?: "AI error") }
+                runCatching { ai.send(Provider.fromId(provider), chosen, prompt, endpoint) }
+                    .getOrElse { AiResult.Failure(it.message ?: "AI error") }
             }
             aiBusy = false
             when (result) {
@@ -399,14 +464,15 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     aiOut = result.text
                     val parsed = CsTranspiler.parseProposal(result.text).map { (path, content) ->
                         val resolved = path.ifBlank { CsTranspiler.guessPath(aiLanguage, aiEvent, openPath) }
-                        val previous = current()?.let { p ->
+                        val previous = current(false)?.let { p ->
                             runCatching { store.resolve(p, resolved).takeIf { it.isFile }?.readText() }.getOrNull()
                         }.orEmpty()
                         ProposalFile(resolved, content, previous)
                     }
                     proposal.clear()
                     proposal += parsed
-                    notify("Proposal готов — проверьте Review")
+                    log("AI proposal: ${parsed.size} файл(ов). Apply только вами.")
+                    notify("Код готов — Review / Apply")
                 }
                 is AiResult.Failure -> {
                     aiOut = "Ошибка: ${result.message}"
@@ -418,13 +484,14 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun applyProposal() {
         val project = current() ?: return notify("Нет проекта")
-        if (proposal.isEmpty()) return notify("Сначала Generate")
+        if (proposal.isEmpty()) return notify("Сначала приказ → Generate")
         proposal.forEach { file ->
             store.writeFile(project, file.path, file.content).onFailure {
                 notify("${file.path}: ${it.message}")
             }
         }
-        notify("Применено: ${proposal.size}")
+        notify("Применено вами: ${proposal.size}")
+        log("Пользователь применил ${proposal.size} файл(ов)")
         refreshFiles()
         refreshScenes()
         openPath?.let { path ->
@@ -438,11 +505,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         if (mcpKey.isNotBlank()) secrets.put("mcp_token", mcpKey)
         if (customKey.isNotBlank()) secrets.put("custom_key", customKey)
         if (customEndpoint.isNotBlank()) {
-            if (!customEndpoint.startsWith("https://")) {
-                notify("Custom endpoint только HTTPS")
-            } else {
-                secrets.put("custom_endpoint", customEndpoint)
-            }
+            if (!customEndpoint.startsWith("https://")) notify("Custom endpoint только HTTPS")
+            else secrets.put("custom_endpoint", customEndpoint)
         }
         prefs.edit()
             .putString("custom_endpoint", customEndpoint)
@@ -450,7 +514,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             .apply()
         zenKey = ""; orKey = ""; mcpKey = ""; customKey = ""
         refreshProviderFlags()
-        notify("Ключи сохранены в Keystore")
+        notify("Ключи в Keystore")
     }
 
     fun checkMcp() {
@@ -472,6 +536,181 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun selectedObject(): SceneObject? = scene?.objects?.firstOrNull { it.name == selected }
 
+    fun refreshGithub() {
+        ghAccounts.clear()
+        ghAccounts += github.accounts()
+    }
+
+    fun addGithubAccount() {
+        viewModelScope.launch {
+            cloudBusy = true
+            val result = withContext(Dispatchers.IO) { github.addAccount(ghLabel, ghTokenInput) }
+            cloudBusy = false
+            result.fold(
+                {
+                    ghTokenInput = ""
+                    refreshGithub()
+                    log("GitHub аккаунт ${it.login} добавлен")
+                    notify("Аккаунт ${it.login}")
+                },
+                { notify(it.message ?: "PAT отклонён") },
+            )
+        }
+    }
+
+    fun selectGithubAccount(id: String) {
+        github.activeId = id
+        refreshGithub()
+        notify("Активен ${ghAccounts.find { it.id == id }?.login ?: id}")
+    }
+
+    fun removeGithubAccount(id: String) {
+        github.removeAccount(id)
+        refreshGithub()
+    }
+
+    fun loadRepos() {
+        viewModelScope.launch {
+            cloudBusy = true
+            val result = withContext(Dispatchers.IO) { github.listRepos() }
+            cloudBusy = false
+            result.fold(
+                {
+                    ghRepos.clear()
+                    ghRepos += it
+                    log("Репозиториев: ${it.size}")
+                },
+                { notify(it.message ?: "repos failed") },
+            )
+        }
+    }
+
+    fun bindRepo(name: String) {
+        boundRepo = name
+        prefs.edit().putString("gh_bound_repo", name).apply()
+        notify("Привязан $name")
+    }
+
+    fun createRepo() {
+        viewModelScope.launch {
+            cloudBusy = true
+            val result = withContext(Dispatchers.IO) {
+                github.createRepo(newRepoName, newRepoPrivate, "MobileForge project")
+            }
+            cloudBusy = false
+            result.fold(
+                {
+                    bindRepo(it.fullName)
+                    loadRepos()
+                    notify("Создан ${it.fullName}")
+                },
+                { notify(it.message ?: "create repo failed") },
+            )
+        }
+    }
+
+    fun pushProjectToGithub() {
+        val project = current() ?: return
+        val repo = boundRepo.ifBlank { return notify("Сначала выберите репозиторий") }
+        viewModelScope.launch {
+            cloudBusy = true
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    store.files(project).forEach { file ->
+                        github.putFile(
+                            repo,
+                            "project/${file.relativePath}",
+                            file.file.readText(),
+                            "studio: ${file.relativePath}",
+                        ).getOrThrow()
+                    }
+                    github.putFile(
+                        repo,
+                        "project/README.md",
+                        "# ${project.name}\n\nSynced from MobileForge phone editor. Builds run on GitHub Actions.\n",
+                        "studio: readme",
+                    ).getOrThrow()
+                }
+            }
+            cloudBusy = false
+            result.fold(
+                { notify("Проект залит в $repo/project"); log("Push ${project.name} → $repo") },
+                { notify(it.message ?: "push failed") },
+            )
+        }
+    }
+
+    fun triggerCloudBuild() {
+        val repo = boundRepo.ifBlank { return notify("Нет репозитория") }
+        viewModelScope.launch {
+            cloudBusy = true
+            val result = withContext(Dispatchers.IO) { github.triggerWorkflow(repo, "android.yml") }
+            cloudBusy = false
+            result.fold(
+                { notify("Runner запущен"); log("workflow_dispatch $repo") },
+                { notify(it.message ?: "dispatch failed") },
+            )
+        }
+    }
+
+    fun loadRuns() {
+        val repo = boundRepo.ifBlank { return notify("Нет репозитория") }
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) { github.runs(repo) }
+            result.fold(
+                { ghRuns.clear(); ghRuns += it },
+                { notify(it.message ?: "runs failed") },
+            )
+        }
+    }
+
+    fun refreshMcp() {
+        mcpServers.clear()
+        mcpServers += mcp.servers()
+        mcpTools.clear()
+        mcpTools += mcp.builtInTools()
+    }
+
+    fun addMcpServer() {
+        mcp.addServer(mcpNewName, mcpNewUrl, mcpNewToken).fold(
+            {
+                mcpNewToken = ""
+                refreshMcp()
+                notify("MCP ${it.name}")
+            },
+            { notify(it.message ?: "MCP не добавлен") },
+        )
+    }
+
+    fun runMcpTool() {
+        viewModelScope.launch {
+            val args = runCatching { JSONObject(mcpArgs.ifBlank { "{}" }) }.getOrElse {
+                notify("args не JSON"); return@launch
+            }
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    if (mcpServerId == "local") {
+                        mcp.callLocal(
+                            mcpTool, args, projectName, scene,
+                            onLog = { log(it) },
+                            addObject = { addObject(it) },
+                            boundRepo = boundRepo,
+                        )
+                    } else {
+                        val server = mcp.servers().first { it.id == mcpServerId }
+                        mcp.callRemote(server, mcpTool, args)
+                    }
+                }
+            }
+            result.fold(
+                { mcpOut = it; log("MCP $mcpTool ok") },
+                { mcpOut = it.message ?: "fail"; notify(mcpOut) },
+            )
+        }
+    }
+
+    fun plugins() = PluginRegistry.bundled
+
     private fun refreshProviderFlags() {
         hasZen = secrets.has("zen_key")
         hasOr = secrets.has("openrouter_key")
@@ -480,9 +719,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         customEndpoint = prefs.getString("custom_endpoint", customEndpoint).orEmpty()
     }
 
-    private fun current(): ProjectStore.Project? =
+    private fun current(alert: Boolean = true): ProjectStore.Project? =
         projectName?.let { store.find(it) } ?: run {
-            if (section != Section.Projects) notify("Сначала откройте проект")
+            if (alert && section != Section.Projects) notify("Сначала откройте проект")
             null
         }
 
@@ -492,15 +731,17 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             "Active scene ${it.name} ${it.dimension} objects: ${it.toJson().toString().take(2500)}\n"
         }.orEmpty()
         return """
-            You are the MobileForge native game-engine coding agent.
-            Return complete file contents in fenced code blocks.
-            Put the file path in the fence tag, for example ```Scripts/Player.js
-            Event hook: $aiEvent
-            Language: $aiLanguage
+            You are a code-only agent for MobileForge. The human is the director.
+            Do not invent gameplay, art direction or architecture beyond the order.
+            Write only code. Return complete files in fenced blocks with paths, e.g. ```Scripts/Player.cs
+            Command type: ${aiCommand.name}
+            Preferred language: $aiLanguage (.cs first)
+            Event hook if relevant: $aiEvent
             Project: ${projectName ?: "none"}
             $sceneCtx
             $fileCtx
-            Task: $aiTask
+            ORDER FROM DIRECTOR:
+            $aiTask
         """.trimIndent()
     }
 }

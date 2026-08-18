@@ -21,6 +21,19 @@ data class SceneObject(
     var solid: Boolean = true,
     var speed: Float = 0f,
     var extra: JSONObject = JSONObject(),
+    var mesh: String = "Cube",
+    var material: String = "",
+    var lightType: String = "Directional",
+    var intensity: Float = 1f,
+    var fov: Float = 60f,
+    var near: Float = 0.3f,
+    var far: Float = 200f,
+    var tag: String = "Untagged",
+    var layer: String = "Default",
+    var enabled: Boolean = true,
+    var mass: Float = 1f,
+    var plugin: String = "",
+    var prefab: String = "",
 ) {
     fun toJson(): JSONObject = JSONObject()
         .put("name", name)
@@ -39,9 +52,29 @@ data class SceneObject(
         .put("color", color)
         .put("solid", solid)
         .put("speed", speed.toDouble())
+        .put("mesh", mesh)
+        .put("material", material)
+        .put("lightType", lightType)
+        .put("intensity", intensity.toDouble())
+        .put("fov", fov.toDouble())
+        .put("near", near.toDouble())
+        .put("far", far.toDouble())
+        .put("tag", tag)
+        .put("layer", layer)
+        .put("enabled", enabled)
+        .put("mass", mass.toDouble())
+        .put("plugin", plugin)
+        .put("prefab", prefab)
         .put("extra", extra)
 
     companion object {
+        val MESHES = listOf("Cube", "Sphere", "Cylinder", "Capsule", "Plane", "Quad", "Block", "Wedge", "Empty")
+        val LIGHTS = listOf("Directional", "Point", "Spot")
+        val TYPES = listOf(
+            "Camera", "Player", "Mesh", "Sprite", "Ground", "Light",
+            "Coin", "Enemy", "Empty", "Button", "Block", "Prefab",
+        )
+
         fun fromJson(json: JSONObject): SceneObject = SceneObject(
             name = json.optString("name", "Object"),
             type = json.optString("type", "Empty"),
@@ -60,7 +93,29 @@ data class SceneObject(
             solid = json.optBoolean("solid", true),
             speed = json.optDouble("speed").toFloat(),
             extra = json.optJSONObject("extra") ?: JSONObject(),
+            mesh = json.optString("mesh", defaultMesh(json.optString("type"))),
+            material = json.optString("material"),
+            lightType = json.optString("lightType", "Directional"),
+            intensity = json.optDouble("intensity", 1.0).toFloat(),
+            fov = json.optDouble("fov", 60.0).toFloat(),
+            near = json.optDouble("near", 0.3).toFloat(),
+            far = json.optDouble("far", 200.0).toFloat(),
+            tag = json.optString("tag", "Untagged"),
+            layer = json.optString("layer", "Default"),
+            enabled = json.optBoolean("enabled", true),
+            mass = json.optDouble("mass", 1.0).toFloat(),
+            plugin = json.optString("plugin"),
+            prefab = json.optString("prefab"),
         )
+
+        fun defaultMesh(type: String): String = when (type) {
+            "Sphere", "Coin" -> "Sphere"
+            "Ground", "Plane" -> "Plane"
+            "Block" -> "Block"
+            "Light", "Camera", "Empty" -> "Empty"
+            "Capsule", "Player" -> "Capsule"
+            else -> "Cube"
+        }
     }
 }
 

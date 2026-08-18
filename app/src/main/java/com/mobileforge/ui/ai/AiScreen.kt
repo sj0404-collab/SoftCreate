@@ -46,7 +46,13 @@ fun AiScreen(vm: AppViewModel) {
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(18.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        MfHero("AI Code Agent", "Провайдер вызывается нативно. Apply пишет файлы только после Review.")
+        MfHero("AI пишет только код", "Вы режиссёр: создать / изменить / удалить / объяснить. Apply — только ваша кнопка.")
+        Text("Приказ", color = MfMuted, fontSize = 12.sp)
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            com.mobileforge.AiCommand.entries.forEach { cmd ->
+                MfButton(cmd.name, primary = vm.aiCommand == cmd) { vm.aiCommand = cmd }
+            }
+        }
         Text("Провайдер", color = MfMuted, fontSize = 12.sp)
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             listOf("zen" to "Zen Direct", "openrouter" to "OpenRouter", "mcp" to "Local MCP", "custom" to "Custom API").forEach { (id, label) ->

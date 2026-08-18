@@ -14,6 +14,7 @@ class ProjectStore(context: Context) {
     private val allowed = setOf(
         "cs", "cpp", "c", "h", "hpp", "json", "xml", "glsl", "vert", "frag",
         "txt", "md", "lua", "js", "kt", "html", "css", "tsv", "csv", "scene",
+        "obj", "gltf", "mat", "prefab", "plugin", "asmdef",
     )
 
     fun projects(): List<Project> =
@@ -31,9 +32,9 @@ class ProjectStore(context: Context) {
         val dir = File(root, safe)
         require(!dir.exists()) { "A project with this name already exists." }
         dir.mkdirs()
-        File(dir, "Scripts").mkdirs()
-        File(dir, "Scenes").mkdirs()
-        File(dir, "Assets").mkdirs()
+        listOf("Scripts", "Scenes", "Assets", "Models", "Materials", "Prefabs", "Plugins").forEach {
+            File(dir, it).mkdirs()
+        }
         val dimension = if (type.equals("2d", true)) "2D" else "3D"
         File(dir, "project.json").writeText(
             """

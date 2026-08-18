@@ -50,7 +50,17 @@ fun SettingsScreen(vm: AppViewModel) {
             MfButton("Save securely", primary = true) { vm.saveSettings() }
             MfButton("Check MCP") { vm.checkMcp() }
         }
-        Text("MCP: 127.0.0.1:8765", color = MfMuted, fontSize = 13.sp)
+        Text("MCP: 127.0.0.1:8765 · полный workbench во вкладке MCP", color = MfMuted, fontSize = 13.sp)
+        Text("Плагины", color = MfMuted, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
+        vm.plugins().forEach { p ->
+            Text("• ${p.title}: ${p.summary}", color = MfMuted, fontSize = 12.sp)
+        }
+        Text(
+            "Сборка APK — GitHub Actions, не телефон. Несколько PAT: вкладка Cloud.",
+            color = MfMuted,
+            fontSize = 12.sp,
+            modifier = Modifier.padding(top = 8.dp),
+        )
     }
 }
 

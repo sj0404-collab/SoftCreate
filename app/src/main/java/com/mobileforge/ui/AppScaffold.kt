@@ -30,11 +30,13 @@ import androidx.compose.ui.unit.sp
 import com.mobileforge.AppViewModel
 import com.mobileforge.Section
 import com.mobileforge.ui.ai.AiScreen
+import com.mobileforge.ui.assets.AssetsScreen
+import com.mobileforge.ui.cloud.CloudScreen
 import com.mobileforge.ui.common.MfButton
 import com.mobileforge.ui.common.MfField
+import com.mobileforge.ui.mcp.McpScreen
 import com.mobileforge.ui.play.PlayScreen
 import com.mobileforge.ui.projects.ProjectsScreen
-import com.mobileforge.ui.scenes.ScenesScreen
 import com.mobileforge.ui.settings.SettingsScreen
 import com.mobileforge.ui.studio.StudioScreen
 import com.mobileforge.ui.theme.MfBg
@@ -47,11 +49,13 @@ import com.mobileforge.ui.theme.MfText
 
 private val tabs = listOf(
     Section.Projects to ("▣" to "Проекты"),
-    Section.Studio to ("⌘" to "Studio"),
-    Section.Scenes to ("◇" to "Сцены"),
+    Section.Studio to ("⌘" to "Редактор"),
+    Section.Assets to ("◇" to "Ассеты"),
     Section.Play to ("▶" to "Play"),
+    Section.Cloud to ("☁" to "Cloud"),
+    Section.Mcp to ("⚒" to "MCP"),
     Section.Ai to ("✦" to "AI"),
-    Section.Settings to ("⚙" to "Настройки"),
+    Section.Settings to ("⚙" to "Ещё"),
 )
 
 @Composable
@@ -140,8 +144,10 @@ fun AppRoot(vm: AppViewModel) {
                     when (vm.section) {
                         Section.Projects -> ProjectsScreen(vm)
                         Section.Studio -> StudioScreen(vm)
-                        Section.Scenes -> ScenesScreen(vm)
+                        Section.Assets -> AssetsScreen(vm)
                         Section.Play -> PlayScreen(vm)
+                        Section.Cloud -> CloudScreen(vm)
+                        Section.Mcp -> McpScreen(vm)
                         Section.Ai -> AiScreen(vm)
                         Section.Settings -> SettingsScreen(vm)
                     }

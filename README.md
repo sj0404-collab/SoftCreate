@@ -1,47 +1,29 @@
-# MobileForge 1.1.0
+# MobileForge 2.0
 
-Нативная Android-студия 2D/3D-игр: Jetpack Compose, без WebView и без HTML-оболочки.
+Телефон — **Unity-like редактор и preview**. Сборка APK — **только GitHub Actions runner**, чтобы не засорять устройство.
 
-HTML больше не является интерфейсом. Опциональный **HTML preview** — только экспорт снимка сцены в файл для шаринга.
+Вы режиссёр: инспектор, ассеты, камера, свет, блоки, модели, `.cs`. Нейросеть **пишет только код** и ничего не применяет без вашей кнопки Apply.
 
-## Что внутри
+## На телефоне
 
-- **Проекты** — создать / открыть / удалить / импорт / экспорт JSON
-- **Studio** — дерево файлов, нативный редактор с **автодополнением** API, сцена и инспектор
-- **Сцены** — 2D / 3D, `Scenes/*.scene.json`
-- **Play** — нативный рантайм: гравитация, коллизии, стик, WASD, Jump; JS/C# исполняет встроенный интерпретатор
-- **AI** — Zen / OpenRouter / MCP / Custom HTTPS → Review → Apply
-- **Settings** — ключи в Android Keystore
-- **SkyRunner demo** — монеты, шипы, ворота
+- Иерархия + сцена + инспектор (transform, mesh, material, light, camera, tag/layer, script)
+- Asset Database: Scripts, Models, Materials, Prefabs, StudioPack
+- Play-preview локально (без компиляции APK на девайсе)
+- Cloud: несколько GitHub PAT/аккаунтов, список репо, создание репо, push проекта, `workflow_dispatch`
+- MCP Workbench: локальные professional tools + HTTPS/localhost серверы
+- AI: Create / Change / Delete / Explain → Review → Apply
 
-## Сборка
+## На runner
 
-JDK 17 + Android SDK 35:
-
-```bash
-./gradlew assembleDebug
-```
-
-CI: `.github/workflows/android.yml`
-
-## Архитектура
+`./gradlew assembleDebug` генерирует `StudioPack` (~60–90 MB текстур/heightmaps/аудио) и пакует APK 50–100 MB.
 
 ```
-Compose UI
-  ├─ AppViewModel
-  ├─ ProjectStore / SceneStore
-  ├─ SecretStore + AiGateway
-  ├─ GameRuntime + ScriptInterpreter
-  └─ SceneRenderer (Canvas)
+workflow_dispatch / push main → artifact MobileForge-2.0.0-debug
 ```
 
-Скрипты Play: `onStart` / `onUpdate` / `onCollisionEnter` и `api.move`, `api.jump`, `api.input`, `Math.sin`, …
+## Безопасность
 
-C# транспилируется в тот же API.
-
-## Прототип
-
-`legacy/MobileForge-0.2.1.apk` — старый WebView-прототип.
+PAT хранятся в Android Keystore. В репозиторий токены не коммитятся.
 
 ## Лицензия
 
