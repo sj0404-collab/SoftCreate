@@ -16,6 +16,7 @@ import com.mobileforge.cloud.GhRepo
 import com.mobileforge.cloud.GhRun
 import com.mobileforge.cloud.GitHubService
 import com.mobileforge.engine.Completions
+import com.mobileforge.engine.ControlLayout
 import com.mobileforge.engine.CsTranspiler
 import com.mobileforge.engine.GameRuntime
 import com.mobileforge.engine.Orbit
@@ -65,6 +66,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     val orbit = Orbit()
     var runtime by mutableStateOf<GameRuntime?>(null)
     var playHud by mutableStateOf("")
+    var playControls by mutableStateOf(ControlLayout.EMPTY)
     var provider by mutableStateOf("zen")
     var model by mutableStateOf("deepseek-v4-flash")
     var customEndpoint by mutableStateOf("")
@@ -150,7 +152,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 refreshScenes()
                 refreshPack()
             }
-            Section.Play -> startPlay()
+            Section.Play -> {}
             Section.Settings -> refreshProviderFlags()
             Section.Cloud -> refreshGithub()
             Section.Mcp -> refreshMcp()
@@ -158,10 +160,15 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun back(): Boolean = when (section) {
-        Section.Play -> { go(Section.Studio); true }
-        Section.Projects -> false
-        else -> { go(Section.Projects); true }
+    fun back(): Boolean {
+        if (runtime?.playing == true) {
+            stopPlay()
+            return true
+        }
+        return when (section) {
+            Section.Projects -> false
+            else -> { go(Section.Studio); true }
+        }
     }
 
     fun refreshProjects() {
@@ -432,10 +439,26 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 runCatching { scripts[obj.script] = store.resolve(project, obj.script).readText() }
             }
         }
+        playControls = runCatching {
+            val file = store.resolve(project, "UI/Controls.json")
+            if (file.isFile) ControlLayout.parse(file.readText()) else ControlLayout.EMPTY
+        }.getOrDefault(ControlLayout.EMPTY)
         runtime?.stop()
         runtime = GameRuntime(currentScene, scripts).also { it.start() }
-        section = Section.Play
-        log("Play preview (локально, без сборки на телефоне)")
+        log(
+            if (playControls.items.isEmpty()) {
+                "Play: сенсор не задан (AI может создать UI/Controls.json)"
+            } else {
+                "Play: ${playControls.items.size} виджет(ов) управления из проекта"
+            },
+        )
+    }
+
+    fun stopPlay() {
+        runtime?.stop()
+        runtime = null
+        playHud = ""
+        log("Play stopped")
     }
 
     fun tickPlay(dt: Float) {
@@ -734,6 +757,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             You are a code-only agent for MobileForge. The human is the director.
             Do not invent gameplay, art direction or architecture beyond the order.
             Write only code. Return complete files in fenced blocks with paths, e.g. ```Scripts/Player.cs
+            There is NO default on-screen touch UI. If the director asks for controls/joystick/buttons/HUD,
+            create UI/Controls.json:
+            {"format":"mobileforge.controls.v1","items":[{"type":"joystick","anchor":"bl","action":"move"},{"type":"button","anchor":"br","label":"Jump","action":"jump"}]}
+            Do not add touch controls unless explicitly asked.
             Command type: ${aiCommand.name}
             Preferred language: $aiLanguage (.cs first)
             Event hook if relevant: $aiEvent
