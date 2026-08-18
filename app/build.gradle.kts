@@ -151,20 +151,15 @@ tasks.register("generateStudioPack") {
                 data[i * 2] = (v and 0xFF).toByte()
                 data[i * 2 + 1] = (v shr 8).toByte()
             }
-            val header = java.nio.ByteBuffer.allocate(44).order(java.nio.ByteOrder.LITTLE_ENDIAN)
-            header.put("RIFF".toByteArray())
-            header.putInt(36 + data.size)
-            header.put("WAVEfmt ".toByteArray())
-            header.putInt(16)
-            header.putShort(1)
-            header.putShort(1)
-            header.putInt(rate)
-            header.putInt(rate * 2)
-            header.putShort(2)
-            header.putShort(16)
-            header.put("data".toByteArray())
-            header.putInt(data.size)
-            File(root, "Audio/$name.wav").writeBytes(header.array() + data)
+            fun leInt(v: Int) = byteArrayOf(
+                (v and 0xFF).toByte(), ((v shr 8) and 0xFF).toByte(),
+                ((v shr 16) and 0xFF).toByte(), ((v shr 24) and 0xFF).toByte(),
+            )
+            fun leShort(v: Int) = byteArrayOf((v and 0xFF).toByte(), ((v shr 8) and 0xFF).toByte())
+            val header = "RIFF".toByteArray() + leInt(36 + data.size) + "WAVEfmt ".toByteArray() +
+                leInt(16) + leShort(1) + leShort(1) + leInt(rate) + leInt(rate * 2) +
+                leShort(2) + leShort(16) + "data".toByteArray() + leInt(data.size)
+            File(root, "Audio/$name.wav").writeBytes(header + data)
         }
         listOf("ui_click" to 880.0, "ui_ok" to 1200.0, "jump" to 420.0, "coin" to 1320.0, "hit" to 180.0, "whoosh" to 90.0).forEach {
             wav(it.first, it.second, 0.35)
