@@ -11,6 +11,8 @@ import androidx.lifecycle.viewModelScope
 import com.mobileforge.agent.AgentCard
 import com.mobileforge.agent.AgentEvent
 import com.mobileforge.agent.AgentParser
+import com.mobileforge.agent.Director
+import com.mobileforge.engine.AssetKitchen
 import com.mobileforge.ai.AiGateway
 import com.mobileforge.ai.AiResult
 import com.mobileforge.ai.ChatTurn
@@ -133,6 +135,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     val agentFeed = mutableStateListOf<AgentEvent>()
     var streamTick by mutableStateOf(0)
     private var agentCancel = false
+    private var lastDirectorTask = ""
     private val sessionStarted = System.currentTimeMillis()
     val sessionLimitMs = 6L * 60 * 60 * 1000
     fun sessionElapsedMs(): Long = System.currentTimeMillis() - sessionStarted
@@ -174,7 +177,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         provider = prefs.getString("ai_provider", "zen").orEmpty().ifBlank { "zen" }
         model = prefs.getString("${provider}_model", ModelCatalog.defaultId(provider))
             .orEmpty().ifBlank { ModelCatalog.defaultId(provider) }
-        log("MobileForge 2.5 — сцена/код/файлы отдельно, путь проекта на диске")
+        log("MobileForge 2.6 — имя из приказа, свои ассеты, без самовольного джойстика")
     }
 
     fun notify(text: String) {
@@ -455,29 +458,72 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun addObject(type: String) {
-        val currentScene = scene ?: return notify("Сначала сцена")
-        val name = type + (currentScene.objects.size + 1)
-        currentScene.objects += SceneObject(
-            name = name,
-            type = type,
-            x = if (type == "Ground" || type == "Plane") 0f else 2f,
-            y = if (type == "Camera") 5f else 1f,
-            z = if (type == "Camera") 10f else 0f,
-            color = when (type) {
+        addObjectFromArgs(org.json.JSONObject().put("type", type))
+    }
+
+    fun addObjectFromArgs(args: org.json.JSONObject): String {
+        val currentScene = scene ?: return "ERROR: no scene"
+        val type = args.optString("type", "Mesh").ifBlank { "Mesh" }
+        val wanted = args.optString("name").ifBlank { type }
+        if (args.optString("name").isBlank() && currentScene.objects.any { it.type == type && type in listOf("Player", "Ground") }) {
+            return "SKIPPED: $type already exists. Pass a unique name if you really need another."
+        }
+        var name = ProjectStore.sanitizeName(wanted).ifBlank { type }
+        if (currentScene.objects.any { it.name == name }) {
+            var i = 2
+            while (currentScene.objects.any { it.name == "${name}_$i" }) i++
+            name = "${name}_$i"
+        }
+        val color = args.optString("color").ifBlank {
+            when (type) {
                 "Coin" -> "#f4c95d"
                 "Enemy" -> "#ffb2c8"
                 "Light" -> "#fff4cc"
                 "Block" -> "#6ea8fe"
+                "Ground", "Plane" -> "#2a3144"
                 else -> "#b69cff"
-            },
+            }
+        }
+        val mesh = args.optString("mesh").ifBlank { SceneObject.defaultMesh(type) }
+        val material = args.optString("material")
+        val extra = org.json.JSONObject()
+        args.optString("pattern").takeIf { it.isNotBlank() }?.let { extra.put("pattern", it) }
+        args.optString("accent").takeIf { it.isNotBlank() }?.let { extra.put("accent", it) }
+        if (material.isNotBlank()) {
+            current(false)?.let { p ->
+                runCatching {
+                    val text = store.resolve(p, material).takeIf { it.isFile }?.readText().orEmpty()
+                    val (c, pat, acc) = AssetKitchen.parseMat(text)
+                    extra.put("pattern", pat)
+                    extra.put("accent", acc)
+                    extra.put("material", material)
+                    if (args.optString("color").isBlank()) extra.put("baked", c)
+                }
+            }
+        }
+        val baked = extra.optString("baked")
+        val onGround = type == "Ground" || type == "Plane"
+        currentScene.objects += SceneObject(
+            name = name,
+            type = type,
+            x = args.optDouble("x", if (onGround) 0.0 else 0.0).toFloat(),
+            y = args.optDouble("y", if (type == "Camera") 5.0 else if (onGround) 0.0 else 1.0).toFloat(),
+            z = args.optDouble("z", if (type == "Camera") 10.0 else if (type == "Player") 4.0 else 0.0).toFloat(),
+            sx = args.optDouble("sx", if (onGround) 16.0 else 1.0).toFloat(),
+            sy = args.optDouble("sy", if (onGround) 1.0 else 1.0).toFloat(),
+            sz = args.optDouble("sz", if (onGround) 16.0 else 1.0).toFloat(),
+            color = baked.ifBlank { color },
             solid = type != "Camera" && type != "Light" && type != "Coin",
-            mesh = SceneObject.defaultMesh(type),
-            script = if (type == "Player") "Scripts/Player.cs" else "",
+            mesh = mesh,
+            material = material,
+            script = args.optString("script").ifBlank { if (type == "Player") "Scripts/Player.js" else "" },
+            extra = extra,
             lightType = if (type == "Light") "Directional" else "Directional",
         )
         selected = name
         persistScene(true)
         log("Добавлен $type $name")
+        return "added $name"
     }
 
     fun deleteSelected() {
@@ -824,20 +870,41 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun runAgent(task: String) {
+        lastDirectorTask = task
         agentCancel = false
         agentRunning = true
         agentStatus = "работа"
         agentRound = 0
         agentToolsUsed = 0
         val started = System.currentTimeMillis()
+        val named = Director.extractProjectName(task)
         val messages = mutableListOf(
             ChatTurn("system", AgentParser.SYSTEM.trimIndent()),
             ChatTurn(
                 "user",
                 buildString {
+                    appendLine("DIRECTOR ORDER (verbatim):")
                     appendLine(task)
+                    appendLine()
+                    appendLine(
+                        if (named != null) {
+                            "Project name you MUST use: $named"
+                        } else {
+                            "No name given. Invent a NEW unique name from the order. Never SkyArena."
+                        },
+                    )
                     appendLine("Active project: ${projectName ?: "none"}")
-                    if (scene != null) appendLine("Active scene: ${scene?.name} ${scene?.dimension}")
+                    if (scene != null) {
+                        appendLine("Active scene: ${scene?.name} ${scene?.dimension}")
+                        appendLine("Objects: ${scene?.objects?.joinToString { it.name + "/" + it.type }.orEmpty()}")
+                    }
+                    if (!Director.wantsControls(task)) {
+                        appendLine("Do NOT call controls.set. Director did not ask for touch UI.")
+                    }
+                    if (!Director.wantsAnimation(task)) {
+                        appendLine("Do NOT add animations.")
+                    }
+                    appendLine("Create unique assets via asset.create for this game.")
                 },
             ),
         )
@@ -959,10 +1026,54 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         log("$title · ${ms}ms")
     }
 
+    private fun createAsset(args: org.json.JSONObject): String {
+        val p = current(false) ?: error("no project")
+        val kind = args.optString("kind", "material").lowercase()
+        val rawName = args.optString("name").ifBlank { "Asset" }
+        val name = ProjectStore.sanitizeName(rawName).ifBlank { "Asset" }
+        val color = args.optString("color").ifBlank { "#6ea8fe" }
+        val accent = args.optString("accent").ifBlank { "#1a1a22" }
+        val pattern = args.optString("pattern").ifBlank { "noise" }
+        val mesh = args.optString("mesh").ifBlank { "Cube" }
+        val written = mutableListOf<String>()
+        when (kind) {
+            "sound", "audio", "wav" -> {
+                val path = "Assets/Audio/$name.wav"
+                val freq = args.optDouble("freq", 660.0)
+                store.writeBytes(p, path, AssetKitchen.wav(freq, 0.35)).getOrThrow()
+                written += path
+            }
+            "mesh", "model" -> {
+                val path = "Assets/Meshes/$name.obj"
+                store.writeFile(p, path, AssetKitchen.meshObj(mesh)).getOrThrow()
+                written += path
+            }
+            "texture" -> {
+                val path = "Assets/Textures/$name.txt"
+                store.writeFile(p, path, AssetKitchen.textureRecipe(name, color, pattern, accent)).getOrThrow()
+                written += path
+                val mat = "Assets/Materials/$name.mat"
+                store.writeFile(p, mat, AssetKitchen.material(color, pattern, accent, mesh, name)).getOrThrow()
+                written += mat
+            }
+            else -> {
+                val mat = "Assets/Materials/$name.mat"
+                store.writeFile(p, mat, AssetKitchen.material(color, pattern, accent, mesh, name)).getOrThrow()
+                written += mat
+                val meshPath = "Assets/Meshes/$name.obj"
+                store.writeFile(p, meshPath, AssetKitchen.meshObj(mesh)).getOrThrow()
+                written += meshPath
+            }
+        }
+        refreshFiles()
+        return "created ${written.joinToString()}"
+    }
+
     private fun executeAgentTool(tool: String, args: org.json.JSONObject): String {
         return when (tool) {
             "project.create" -> {
-                val name = args.optString("name")
+                val proposed = args.optString("name")
+                val name = Director.resolveName(lastDirectorTask, proposed)
                 val type = args.optString("type", "3d")
                 val created = store.create(name, type).getOrThrow()
                 openProject(created.name, navigate = false)
@@ -998,18 +1109,20 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 "scene ok"
             }
             "scene.list" -> scenes.joinToString { it.name }.ifBlank { "(no scenes)" }
-            "scene.add_object" -> {
-                addObject(args.optString("type", "Mesh"))
-                "added"
-            }
+            "scene.add_object" -> addObjectFromArgs(args)
+            "asset.create" -> createAsset(args)
             "controls.set" -> {
-                val p = current(false) ?: error("no project")
-                val body = if (args.has("items")) {
-                    org.json.JSONObject().put("format", "mobileforge.controls.v1").put("items", args.get("items")).toString(2)
-                } else args.toString(2)
-                store.writeFile(p, "UI/Controls.json", body).getOrThrow()
-                refreshFiles()
-                "controls saved"
+                if (!Director.wantsControls(lastDirectorTask)) {
+                    "SKIPPED: director did not ask for touch UI / joystick / buttons"
+                } else {
+                    val p = current(false) ?: error("no project")
+                    val body = if (args.has("items")) {
+                        org.json.JSONObject().put("format", "mobileforge.controls.v1").put("items", args.get("items")).toString(2)
+                    } else args.toString(2)
+                    store.writeFile(p, "UI/Controls.json", body).getOrThrow()
+                    refreshFiles()
+                    "controls saved"
+                }
             }
             "play.start" -> {
                 startPlay()
@@ -1052,6 +1165,15 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             Command type: ${aiCommand.name}
             Preferred language: $aiLanguage (.cs first)
             Event hook if relevant: $aiEvent
+            Project: ${projectName ?: "none"}
+            $sceneCtx
+            $fileCtx
+            ORDER FROM DIRECTOR:
+            $aiTask
+        """.trimIndent()
+    }
+}
+Event
             Project: ${projectName ?: "none"}
             $sceneCtx
             $fileCtx

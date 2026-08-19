@@ -176,26 +176,29 @@ object SceneRenderer {
         h: Float,
         selected: Boolean,
     ): List<Face> {
-        val hw = kotlin.math.abs(obj.sx) * 0.5f
-        val hh = if (obj.type == "Ground") 0.08f else kotlin.math.abs(obj.sy) * 0.5f
-        val hd = kotlin.math.abs(obj.sz) * 0.5f
-        val corners = listOf(
-            Triple(-hw, -hh, -hd), Triple(hw, -hh, -hd), Triple(hw, hh, -hd), Triple(-hw, hh, -hd),
-            Triple(-hw, -hh, hd), Triple(hw, -hh, hd), Triple(hw, hh, hd), Triple(-hw, hh, hd),
-        ).map { (x, y, z) ->
-            project(obj.x + x, obj.y + y, obj.z + z, camX, camY, camZ, camRx, camRy, w, h)
+        val mesh = obj.mesh.ifBlank { SceneObject.defaultMesh(obj.type) }
+        val hw = kotlin.math.abs(obj.sx) * (if (mesh.equals("Capsule", true) || obj.type == "Player") 0.35f else 0.5f)
+        val hh = when {
+            obj.type == "Ground" || mesh.equals("Plane", true) -> 0.08f
+            mesh.equals("Capsule", true) || obj.type == "Player" -> kotlin.math.abs(obj.sy) * 0.75f
+            else -> kotlin.math.abs(obj.sy) * 0.5f
         }
-        val quads = listOf(
-            listOf(0, 1, 2, 3), listOf(4, 5, 6, 7), listOf(0, 1, 5, 4),
-            listOf(2, 3, 7, 6), listOf(1, 2, 6, 5), listOf(0, 3, 7, 4),
-        )
+        val hd = kotlin.math.abs(obj.sz) * (if (mesh.equals("Capsule", true) || obj.type == "Player") 0.35f else 0.5f)
+        val locals = meshLocals(mesh, hw, hh, hd)
+        val corners = locals.map { (lx, ly, lz) ->
+            project(obj.x + lx, obj.y + ly, obj.z + lz, camX, camY, camZ, camRx, camRy, w, h)
+        }
+        val quads = meshQuads(mesh, locals.size)
         val base = parseColor(obj.color)
+        val accent = parseColor(obj.extra.optString("accent", obj.color).ifBlank { obj.color })
+        val pattern = obj.extra.optString("pattern", "flat")
         return quads.mapIndexedNotNull { qi, idx ->
-            val pts = idx.map { corners[it] }
+            val pts = idx.map { corners.getOrNull(it) }
             if (pts.any { it == null }) return@mapIndexedNotNull null
             val ready = pts.filterNotNull()
+            if (ready.size < 3) return@mapIndexedNotNull null
             val z = ready.map { it.z }.average().toFloat()
-            Face(z, ready.map { it.offset }, shade(base, (qi - 2) * 18), selected)
+            Face(z, ready.map { it.offset }, patternColor(base, accent, pattern, qi), selected)
         }
     }
 
@@ -209,6 +212,51 @@ object SceneRenderer {
     ): Proj? {
         val p = Projection.project(x, y, z, cx, cy, cz, rxDeg, ryDeg, w, h) ?: return null
         return Proj(Offset(p.x, p.y), p.depth)
+    }
+
+    private fun meshLocals(mesh: String, hw: Float, hh: Float, hd: Float): List<Triple<Float, Float, Float>> {
+        return when (mesh.lowercase()) {
+            "wedge", "ramp" -> listOf(
+                Triple(-hw, -hh, -hd), Triple(hw, -hh, -hd), Triple(hw, -hh, hd), Triple(-hw, -hh, hd),
+                Triple(-hw, hh, -hd), Triple(-hw, hh, hd),
+            )
+            "pyramid", "crystal" -> listOf(
+                Triple(-hw, -hh, -hd), Triple(hw, -hh, -hd), Triple(hw, -hh, hd), Triple(-hw, -hh, hd),
+                Triple(0f, hh, 0f),
+            )
+            else -> listOf(
+                Triple(-hw, -hh, -hd), Triple(hw, -hh, -hd), Triple(hw, hh, -hd), Triple(-hw, hh, -hd),
+                Triple(-hw, -hh, hd), Triple(hw, -hh, hd), Triple(hw, hh, hd), Triple(-hw, hh, hd),
+            )
+        }
+    }
+
+    private fun meshQuads(mesh: String, count: Int): List<List<Int>> = when {
+        count == 6 && mesh.equals("wedge", true) || mesh.equals("ramp", true) -> listOf(
+            listOf(0, 1, 2, 3), listOf(0, 4, 5, 3), listOf(1, 2, 5, 4), listOf(0, 1, 4, 4), listOf(3, 2, 5, 5),
+        )
+        count == 5 -> listOf(
+            listOf(0, 1, 2, 3), listOf(0, 1, 4, 4), listOf(1, 2, 4, 4), listOf(2, 3, 4, 4), listOf(3, 0, 4, 4),
+        )
+        else -> listOf(
+            listOf(0, 1, 2, 3), listOf(4, 5, 6, 7), listOf(0, 1, 5, 4),
+            listOf(2, 3, 7, 6), listOf(1, 2, 6, 5), listOf(0, 3, 7, 4),
+        )
+    }
+
+    private fun patternColor(base: Color, accent: Color, pattern: String, face: Int): Color {
+        val mix = when (pattern.lowercase()) {
+            "stripes" -> if (face % 2 == 0) 0.15f else 0.55f
+            "checker" -> if ((face / 2) % 2 == 0) 0.2f else 0.6f
+            "noise" -> ((face * 37 + 13) % 10) / 14f
+            "gradient" -> face / 6f
+            else -> (face - 2) * 0.07f + 0.35f
+        }.coerceIn(0f, 1f)
+        return Color(
+            base.red * (1 - mix) + accent.red * mix,
+            base.green * (1 - mix) + accent.green * mix,
+            base.blue * (1 - mix) + accent.blue * mix,
+        )
     }
 
     fun parseColor(hex: String): Color {

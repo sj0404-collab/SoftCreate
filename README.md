@@ -1,4 +1,4 @@
-# MobileForge 2.5
+# MobileForge 2.6
 
 Вертикально — AI и код. Горизонтально — панели Unity (Hierarchy / Scene / Inspector / Project / Console) с живыми данными.
 
@@ -23,7 +23,7 @@
 `./gradlew assembleDebug` генерирует `StudioPack` (~60–90 MB текстур/heightmaps/аудио) и пакует APK 50–100 MB.
 
 ```
-workflow_dispatch / push main → artifact MobileForge-2.5.0-debug
+workflow_dispatch / push main → artifact MobileForge-2.6.0-debug
 ```
 
 ## Безопасность

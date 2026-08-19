@@ -14,7 +14,7 @@ class ProjectStore(context: Context) {
     private val allowed = setOf(
         "cs", "cpp", "c", "h", "hpp", "json", "xml", "glsl", "vert", "frag",
         "txt", "md", "lua", "js", "kt", "html", "css", "tsv", "csv", "scene",
-        "obj", "gltf", "mat", "prefab", "plugin", "asmdef",
+        "obj", "gltf", "mat", "prefab", "plugin", "asmdef", "wav", "png", "bmp", "rgb",
     )
 
     fun projects(): List<Project> =
@@ -32,7 +32,10 @@ class ProjectStore(context: Context) {
         val dir = File(root, safe)
         require(!dir.exists()) { "A project with this name already exists." }
         dir.mkdirs()
-        listOf("Scripts", "Scenes", "Assets", "Models", "Materials", "Prefabs", "Plugins").forEach {
+        listOf(
+            "Scripts", "Scenes", "Assets", "Assets/Textures", "Assets/Audio", "Assets/Meshes",
+            "Models", "Materials", "Prefabs", "Plugins",
+        ).forEach {
             File(dir, it).mkdirs()
         }
         val dimension = if (type.equals("2d", true)) "2D" else "3D"
@@ -123,6 +126,14 @@ class ProjectStore(context: Context) {
             SourceFile(relativePath.replace('\\', '/'), target)
         }
 
+    fun writeBytes(project: Project, relativePath: String, bytes: ByteArray): Result<SourceFile> =
+        runCatching {
+            val target = resolve(project, relativePath)
+            target.parentFile?.mkdirs()
+            target.writeBytes(bytes)
+            SourceFile(relativePath.replace('\\', '/'), target)
+        }
+
     fun deleteFile(project: Project, relativePath: String): Result<Unit> = runCatching {
         val target = resolve(project, relativePath)
         require(target.exists()) { "File not found." }
@@ -183,18 +194,18 @@ class ProjectStore(context: Context) {
     }
 
     private fun writeStarter(dir: File, name: String, dimension: String) {
-        val is3d = dimension == "3D"
-        File(dir, "Scripts/Player.js").writeText(starterJs(name, is3d))
-        File(dir, "Scripts/Player.cs").writeText(starterCs(name, is3d))
-        val scene = GameScene(
-            name = "Main",
-            dimension = dimension,
-            objects = starterObjects(is3d).toMutableList(),
-            file = File(dir, "Scenes/Main.scene.json"),
+        File(dir, "Scripts/Player.js").writeText(
+            "// $name — fill only what the director asked\nfunction onStart(api) { api.log(\"$name ready\"); }\nfunction onUpdate(api, dt) {\n  const speed = api.object.speed || 6;\n  api.move(api.input.x * speed * dt, 0, api.input.y * speed * dt);\n  if (api.input.jump) api.jump(7);\n}\n",
         )
-        SceneStore().save(scene)
+        val objects = mutableListOf(
+            SceneObject("MainCamera", "Camera", 0f, 5f, 10f, rx = -18f, color = "#9aa4b2", solid = false),
+            SceneObject("Light", "Light", 3f, 8f, 2f, color = "#fff4cc", solid = false),
+        )
+        SceneStore().save(
+            GameScene(name = "Main", dimension = dimension, objects = objects, file = File(dir, "Scenes/Main.scene.json")),
+        )
         File(dir, "Assets/readme.txt").writeText(
-            "Drop text assets here. Meshes are generated primitives (cube, sprite, ground).\n",
+            "Project $name. Create unique materials/meshes/sounds in Assets/ — do not reuse StudioPack defaults.\n",
         )
     }
 
