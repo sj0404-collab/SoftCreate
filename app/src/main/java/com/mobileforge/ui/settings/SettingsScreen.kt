@@ -46,6 +46,12 @@ fun SettingsScreen(vm: AppViewModel) {
         KeyRow("Custom API key", vm.hasCustom)
         MfField(vm.customKey, { vm.customKey = it }, "optional", password = true)
         MfField(vm.customEndpoint, { vm.customEndpoint = it }, "Custom HTTPS endpoint")
+        KeyRow("OrcaRouter (sk-orca-…)", vm.hasOrca)
+        MfField(vm.orcaKey, { vm.orcaKey = it }, "sk-orca-… хранится только на устройстве", password = true)
+        KeyRow("Gemini ключи (до 3, ротация при 429)", vm.hasGemini)
+        MfField(vm.geminiKey1, { vm.geminiKey1 = it }, "AIza… ключ 1", password = true)
+        MfField(vm.geminiKey2, { vm.geminiKey2 = it }, "AIza… ключ 2", password = true)
+        MfField(vm.geminiKey3, { vm.geminiKey3 = it }, "AIza… ключ 3", password = true)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             MfButton("Save securely", primary = true) { vm.saveSettings() }
             MfButton("Check MCP") { vm.checkMcp() }

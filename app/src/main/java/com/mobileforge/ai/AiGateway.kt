@@ -78,6 +78,96 @@ class AiGateway(private val secrets: SecretStore) {
         throw last ?: IllegalStateException("Zen недоступен")
     }
 
+    fun converseResilient(
+        preferred: Provider,
+        model: String,
+        messages: List<ChatTurn>,
+        customEndpoint: String = "",
+    ): Result<ChatReply> {
+        val order = buildList {
+            add(preferred)
+            if (secrets.has("orca_key")) add(Provider.ORCA)
+            if (geminiKeys().isNotEmpty()) add(Provider.GEMINI)
+            add(Provider.ZEN_DIRECT)
+        }.distinct()
+        var last: Throwable? = null
+        for (p in order) {
+            val result = converse(p, model, messages, customEndpoint)
+            if (result.isSuccess) {
+                return result.map { it.copy(model = it.model.ifBlank { "${p.name}:$model" }) }
+            }
+            last = result.exceptionOrNull()
+            if (last != null && !isTransient(last) && p == preferred && p != Provider.ZEN_DIRECT) {
+                // still try fallbacks on hard fail of preferred if others exist
+            }
+        }
+        return Result.failure(last ?: IllegalStateException("Все провайдеры недоступны"))
+    }
+
+    private fun geminiKeys(): List<String> = listOf("gemini_key_1", "gemini_key_2", "gemini_key_3")
+        .mapNotNull { secrets.get(it)?.takeIf { k -> k.isNotBlank() } }
+
+    private fun geminiChat(preferredModel: String, messages: List<ChatTurn>): ChatReply {
+        val models = listOf(
+            preferredModel.takeIf { it.startsWith("gemini") },
+            "gemini-2.0-flash",
+            "gemini-2.0-flash-lite",
+            "gemini-1.5-flash",
+        ).filterNotNull().distinct()
+        val keys = geminiKeys()
+        require(keys.isNotEmpty()) { "Gemini API key is not configured" }
+        var last: Exception? = null
+        for (key in keys) {
+            for (m in models) {
+                try {
+                    return geminiOnce(m, key, messages).copy(model = m)
+                } catch (e: Exception) {
+                    last = e
+                    if (!isTransient(e) && "429" !in e.message.orEmpty() && "403" !in e.message.orEmpty()) {
+                        continue
+                    }
+                }
+            }
+        }
+        throw last ?: IllegalStateException("Gemini недоступен")
+    }
+
+    private fun geminiOnce(model: String, key: String, messages: List<ChatTurn>): ChatReply {
+        val system = messages.filter { it.role == "system" }.joinToString("\n") { it.content }
+        val contents = JSONArray()
+        messages.filter { it.role != "system" }.forEach { turn ->
+            val role = if (turn.role == "assistant") "model" else "user"
+            contents.put(
+                JSONObject()
+                    .put("role", role)
+                    .put("parts", JSONArray().put(JSONObject().put("text", turn.content))),
+            )
+        }
+        val body = JSONObject().put("contents", contents)
+        if (system.isNotBlank()) {
+            body.put("systemInstruction", JSONObject().put("parts", JSONArray().put(JSONObject().put("text", system))))
+        }
+        val url = "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$key"
+        val response = post(url, body.toString(), null)
+        val json = JSONObject(response)
+        if (json.has("error")) {
+            error(json.optJSONObject("error")?.optString("message") ?: "Gemini error")
+        }
+        val parts = json.getJSONArray("candidates")
+            .getJSONObject(0)
+            .getJSONObject("content")
+            .optJSONArray("parts") ?: JSONArray()
+        val text = buildString {
+            for (i in 0 until parts.length()) append(parts.getJSONObject(i).optString("text"))
+        }.ifBlank { "Empty response" }
+        val usage = json.optJSONObject("usageMetadata")
+        return ChatReply(
+            text = text,
+            promptTokens = usage?.optInt("promptTokenCount") ?: 0,
+            completionTokens = usage?.optInt("candidatesTokenCount") ?: 0,
+        )
+    }
+
     companion object {
         val ZEN_FREE = listOf(
             "laguna-s-2.1-free",

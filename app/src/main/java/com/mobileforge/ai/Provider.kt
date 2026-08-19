@@ -5,6 +5,8 @@ enum class Provider {
     OPENROUTER,
     LOCAL_MCP,
     CUSTOM,
+    ORCA,
+    GEMINI,
     ;
 
     companion object {
@@ -13,6 +15,8 @@ enum class Provider {
             "openrouter" -> OPENROUTER
             "mcp", "local_mcp", "localmcp" -> LOCAL_MCP
             "custom" -> CUSTOM
+            "orca", "orcarouter" -> ORCA
+            "gemini", "google" -> GEMINI
             else -> error("Unsupported provider: $id")
         }
     }

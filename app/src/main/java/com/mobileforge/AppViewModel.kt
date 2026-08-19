@@ -85,10 +85,16 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     var orKey by mutableStateOf("")
     var mcpKey by mutableStateOf("")
     var customKey by mutableStateOf("")
+    var orcaKey by mutableStateOf("")
+    var geminiKey1 by mutableStateOf("")
+    var geminiKey2 by mutableStateOf("")
+    var geminiKey3 by mutableStateOf("")
     var hasZen by mutableStateOf(false)
     var hasOr by mutableStateOf(false)
     var hasMcp by mutableStateOf(false)
     var hasCustom by mutableStateOf(false)
+    var hasOrca by mutableStateOf(false)
+    var hasGemini by mutableStateOf(false)
     var dialog by mutableStateOf<String?>(null)
     var dialogValue by mutableStateOf("")
     var importText by mutableStateOf("")
@@ -130,8 +136,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     val models: List<String>
         get() {
             val preset = when (provider) {
-                "zen" -> listOf("deepseek-v4-flash", "deepseek-v4-flash-free", "mimo-v2.5-free", "nemotron-3-ultra-free", "north-mini-code-free", "laguna-s-2.1-free")
+                "zen" -> listOf("laguna-s-2.1-free", "deepseek-v4-flash-free", "mimo-v2.5-free", "nemotron-3-ultra-free", "north-mini-code-free", "deepseek-v4-flash")
                 "openrouter" -> listOf("openrouter/free", "google/gemma-3-27b-it:free", "meta-llama/llama-3.3-70b-instruct:free", "qwen/qwen3-30b-a3b:free")
+                "orca" -> listOf("orcarouter/auto", "auto")
+                "gemini" -> listOf("gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-1.5-flash")
                 "mcp" -> listOf("Termux local agent model")
                 else -> emptyList()
             }
@@ -548,6 +556,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         if (orKey.isNotBlank()) secrets.put("openrouter_key", orKey)
         if (mcpKey.isNotBlank()) secrets.put("mcp_token", mcpKey)
         if (customKey.isNotBlank()) secrets.put("custom_key", customKey)
+        if (orcaKey.isNotBlank()) secrets.put("orca_key", orcaKey)
+        if (geminiKey1.isNotBlank()) secrets.put("gemini_key_1", geminiKey1)
+        if (geminiKey2.isNotBlank()) secrets.put("gemini_key_2", geminiKey2)
+        if (geminiKey3.isNotBlank()) secrets.put("gemini_key_3", geminiKey3)
         if (customEndpoint.isNotBlank()) {
             if (!customEndpoint.startsWith("https://")) notify("Custom endpoint только HTTPS")
             else secrets.put("custom_endpoint", customEndpoint)
@@ -557,6 +569,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             .putString("${provider}_model", customModel.ifBlank { model })
             .apply()
         zenKey = ""; orKey = ""; mcpKey = ""; customKey = ""
+        orcaKey = ""; geminiKey1 = ""; geminiKey2 = ""; geminiKey3 = ""
         refreshProviderFlags()
         notify("Ключи в Keystore")
     }
@@ -800,7 +813,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     agentRound = safety
                     agentElapsed = ((System.currentTimeMillis() - started) / 1000).toInt()
                     val reply = withContext(Dispatchers.IO) {
-                        ai.converse(Provider.fromId(provider), customModel.ifBlank { model }, messages, customEndpoint)
+                        ai.converseResilient(Provider.fromId(provider), customModel.ifBlank { model }, messages, customEndpoint)
                     }.getOrElse {
                         val msg = it.message ?: "fail"
                         val human = if (com.mobileforge.ai.AiGateway.isTransient(it)) {
@@ -922,6 +935,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         hasOr = secrets.has("openrouter_key")
         hasMcp = secrets.has("mcp_token")
         hasCustom = secrets.has("custom_key")
+        hasOrca = secrets.has("orca_key")
+        hasGemini = secrets.has("gemini_key_1") || secrets.has("gemini_key_2") || secrets.has("gemini_key_3")
         customEndpoint = prefs.getString("custom_endpoint", customEndpoint).orEmpty()
     }
 
