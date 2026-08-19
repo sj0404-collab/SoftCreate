@@ -102,7 +102,7 @@ fun AgentScreen(vm: AppViewModel) {
             Spacer(Modifier.width(6.dp))
             IconBtn("■", active = vm.agentRunning) { vm.stopAgent() }
         }
-        Column(Modifier.fillMaxWidth().background(Bar).padding(horizontal = 16.dp, bottom = 12.dp)) {
+        Column(Modifier.fillMaxWidth().background(Bar).padding(start = 16.dp, end = 16.dp, bottom = 12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.size(8.dp).clip(CircleShape).background(if (vm.agentRunning) Teal else Ok))
                 Spacer(Modifier.width(8.dp))
