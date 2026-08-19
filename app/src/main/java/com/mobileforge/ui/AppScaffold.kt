@@ -1,6 +1,5 @@
 package com.mobileforge.ui
 
-import android.content.res.Configuration
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -14,21 +13,16 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.unit.dp
 import com.mobileforge.AppViewModel
-import com.mobileforge.Section
 import com.mobileforge.ui.agent.AgentScreen
 import com.mobileforge.ui.common.MfButton
 import com.mobileforge.ui.common.MfField
-import com.mobileforge.ui.portrait.PortraitStudio
 import com.mobileforge.ui.theme.MfBg
-import com.mobileforge.ui.unity.UnityWorkspace
 
 @Composable
 fun AppRoot(vm: AppViewModel) {
     val snack = remember { SnackbarHostState() }
-    val landscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
     LaunchedEffect(vm.toast) {
         val msg = vm.toast ?: return@LaunchedEffect
         snack.showSnackbar(msg)
@@ -39,11 +33,7 @@ fun AppRoot(vm: AppViewModel) {
         containerColor = MfBg,
     ) { padding ->
         androidx.compose.foundation.layout.Box(Modifier.padding(padding)) {
-            when {
-                vm.section == Section.Agent -> AgentScreen(vm)
-                landscape -> UnityWorkspace(vm)
-                else -> PortraitStudio(vm)
-            }
+            AgentScreen(vm)
         }
     }
     Dialogs(vm)

@@ -2,6 +2,27 @@ package com.mobileforge.agent
 
 import org.json.JSONObject
 
+sealed class AgentEvent {
+    abstract val id: Long
+    data class User(override val id: Long, val text: String) : AgentEvent()
+    data class Assistant(
+        override val id: Long,
+        val text: String,
+        val thinking: String = "",
+        val live: Boolean = false,
+    ) : AgentEvent()
+    data class Tool(
+        override val id: Long,
+        val title: String,
+        val tool: String,
+        val args: String,
+        val result: String,
+        val ms: Long,
+        val ok: Boolean,
+        val expanded: Boolean = false,
+    ) : AgentEvent()
+}
+
 data class AgentCard(
     val id: Long,
     val title: String,

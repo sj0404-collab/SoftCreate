@@ -9,6 +9,7 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.mobileforge.agent.AgentCard
+import com.mobileforge.agent.AgentEvent
 import com.mobileforge.agent.AgentParser
 import com.mobileforge.ai.AiGateway
 import com.mobileforge.ai.AiResult
@@ -127,6 +128,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     var agentElapsed by mutableStateOf(0)
     var agentMenu by mutableStateOf(false)
     val agentCards = mutableStateListOf<AgentCard>()
+    val agentFeed = mutableStateListOf<AgentEvent>()
+    var streamTick by mutableStateOf(0)
     private var agentCancel = false
     private val sessionStarted = System.currentTimeMillis()
     val sessionLimitMs = 6L * 60 * 60 * 1000
@@ -771,6 +774,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun toggleCard(id: Long) {
         val i = agentCards.indexOfFirst { it.id == id }
         if (i >= 0) agentCards[i] = agentCards[i].copy(expanded = !agentCards[i].expanded)
+        val f = agentFeed.indexOfFirst { it.id == id }
+        if (f >= 0) {
+            val ev = agentFeed[f]
+            if (ev is AgentEvent.Tool) agentFeed[f] = ev.copy(expanded = !ev.expanded)
+        }
     }
 
     fun stopAgent() {
@@ -784,6 +792,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         val task = agentInput.trim()
         if (task.isBlank() || agentRunning) return
         agentInput = ""
+        agentFeed += AgentEvent.User(System.nanoTime(), task)
+        streamTick++
         runAgent(task)
     }
 
@@ -812,8 +822,33 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     safety++
                     agentRound = safety
                     agentElapsed = ((System.currentTimeMillis() - started) / 1000).toInt()
+                    val liveId = System.nanoTime()
+                    withContext(Dispatchers.Main) {
+                        agentFeed += AgentEvent.Assistant(liveId, "", "", live = true)
+                        streamTick++
+                    }
+                    val main = android.os.Handler(android.os.Looper.getMainLooper())
                     val reply = withContext(Dispatchers.IO) {
-                        ai.converseResilient(Provider.fromId(provider), customModel.ifBlank { model }, messages, customEndpoint)
+                        ai.converseStream(
+                            Provider.fromId(provider),
+                            customModel.ifBlank { model },
+                            messages,
+                            customEndpoint,
+                            abort = { agentCancel },
+                        ) { delta ->
+                            main.post {
+                                val idx = agentFeed.indexOfFirst { it.id == liveId }
+                                if (idx >= 0) {
+                                    val cur = agentFeed[idx] as? AgentEvent.Assistant ?: return@post
+                                    agentFeed[idx] = cur.copy(
+                                        text = cur.text + delta.text,
+                                        thinking = cur.thinking + delta.thinking,
+                                        live = true,
+                                    )
+                                    streamTick++
+                                }
+                            }
+                        }
                     }.getOrElse {
                         val msg = it.message ?: "fail"
                         val human = if (com.mobileforge.ai.AiGateway.isTransient(it)) {
@@ -855,10 +890,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun pushCard(title: String, tool: String, args: String, result: String, ms: Long, ok: Boolean) {
+        val id = System.nanoTime()
         agentCards.add(
             0,
             AgentCard(
-                id = System.nanoTime(),
+                id = id,
                 title = title,
                 tool = tool,
                 args = args,
@@ -867,6 +903,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 ok = ok,
             ),
         )
+        agentFeed += AgentEvent.Tool(id, title, tool, args, result, ms, ok)
+        streamTick++
         log("$title · ${ms}ms")
     }
 

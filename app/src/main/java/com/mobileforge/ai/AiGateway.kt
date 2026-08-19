@@ -114,6 +114,191 @@ class AiGateway(private val secrets: SecretStore) {
         return Result.failure(last ?: IllegalStateException("Все провайдеры недоступны"))
     }
 
+    fun converseStream(
+        provider: Provider,
+        model: String,
+        messages: List<ChatTurn>,
+        customEndpoint: String = "",
+        abort: () -> Boolean = { false },
+        onDelta: (StreamDelta) -> Unit,
+    ): Result<ChatReply> {
+        val streamed = runCatching {
+            when (provider) {
+                Provider.GEMINI -> geminiStream(model, messages, abort, onDelta)
+                Provider.LOCAL_MCP -> converse(provider, model, messages, customEndpoint).getOrThrow()
+                else -> {
+                    val (endpoint, key, requireKey, resolved) = endpointFor(provider, model, customEndpoint)
+                    streamChat(endpoint, key, resolved, messages, requireKey, abort, onDelta)
+                }
+            }
+        }
+        if (streamed.isSuccess) return streamed
+        return converseResilient(provider, model, messages, customEndpoint)
+    }
+
+    private data class Route(val endpoint: String, val key: String?, val requireKey: Boolean, val model: String)
+
+    private fun endpointFor(provider: Provider, model: String, customEndpoint: String): Route = when (provider) {
+        Provider.ZEN_DIRECT -> Route(
+            "https://opencode.ai/zen/v1/chat/completions",
+            secrets.get("zen_key"),
+            false,
+            model,
+        )
+        Provider.OPENROUTER -> Route(
+            "https://openrouter.ai/api/v1/chat/completions",
+            secrets.get("openrouter_key"),
+            true,
+            model,
+        )
+        Provider.ORCA -> Route(
+            "https://api.orcarouter.ai/v1/chat/completions",
+            secrets.get("orca_key"),
+            true,
+            if (model.isBlank() || model.endsWith("/auto") || model.contains("laguna", true)) "orcarouter/free" else model,
+        )
+        Provider.CUSTOM -> Route(
+            customEndpoint.ifBlank { secrets.get("custom_endpoint").orEmpty() },
+            secrets.get("custom_key"),
+            true,
+            model,
+        )
+        else -> Route("", null, true, model)
+    }
+
+    private fun streamChat(
+        endpoint: String,
+        key: String?,
+        model: String,
+        messages: List<ChatTurn>,
+        requireKey: Boolean,
+        abort: () -> Boolean,
+        onDelta: (StreamDelta) -> Unit,
+    ): ChatReply {
+        if (requireKey && key.isNullOrBlank()) error("API key is not configured")
+        val arr = JSONArray()
+        messages.forEach { turn ->
+            arr.put(JSONObject().put("role", turn.role).put("content", turn.content))
+        }
+        val body = JSONObject().put("model", model).put("messages", arr).put("stream", true).toString()
+        val auth = if (key.isNullOrBlank()) null else "Bearer $key"
+        val connection = (URL(endpoint).openConnection() as HttpURLConnection).apply {
+            requestMethod = "POST"
+            connectTimeout = 20_000
+            readTimeout = 180_000
+            doOutput = true
+            setRequestProperty("Content-Type", "application/json")
+            setRequestProperty("Accept", "text/event-stream")
+            if (auth != null) setRequestProperty("Authorization", auth)
+            if (endpoint.contains("openrouter.ai")) {
+                setRequestProperty("HTTP-Referer", "https://mobileforge.local")
+                setRequestProperty("X-Title", "MobileForge")
+            }
+        }
+        try {
+            connection.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
+            val code = connection.responseCode
+            if (code !in 200..299) {
+                val err = connection.errorStream?.bufferedReader()?.readText().orEmpty()
+                error("HTTP $code: ${err.take(400)}")
+            }
+            val text = StringBuilder()
+            val think = StringBuilder()
+            BufferedReader(InputStreamReader(connection.inputStream, Charsets.UTF_8)).use { reader ->
+                while (true) {
+                    if (abort()) break
+                    val line = reader.readLine() ?: break
+                    if (!line.startsWith("data:")) continue
+                    val data = line.removePrefix("data:").trim()
+                    if (data.isEmpty() || data == "[DONE]") {
+                        if (data == "[DONE]") break
+                        continue
+                    }
+                    val json = runCatching { JSONObject(data) }.getOrNull() ?: continue
+                    val choice = json.optJSONArray("choices")?.optJSONObject(0) ?: continue
+                    val delta = choice.optJSONObject("delta") ?: choice.optJSONObject("message") ?: JSONObject()
+                    val piece = delta.optString("content")
+                    val reason = listOf("reasoning", "reasoning_content", "thinking")
+                        .map { delta.optString(it) }
+                        .firstOrNull { it.isNotBlank() }
+                        .orEmpty()
+                    if (piece.isNotEmpty()) text.append(piece)
+                    if (reason.isNotEmpty()) think.append(reason)
+                    if (piece.isNotEmpty() || reason.isNotEmpty()) {
+                        onDelta(StreamDelta(piece, reason))
+                    }
+                }
+            }
+            return ChatReply(text = text.toString(), thinking = think.toString(), model = model)
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    private fun geminiStream(
+        preferredModel: String,
+        messages: List<ChatTurn>,
+        abort: () -> Boolean,
+        onDelta: (StreamDelta) -> Unit,
+    ): ChatReply {
+        val model = if (preferredModel.startsWith("gemini")) preferredModel else "gemini-2.0-flash"
+        val key = geminiKeys().firstOrNull() ?: error("Gemini API key is not configured")
+        val system = messages.filter { it.role == "system" }.joinToString("\n") { it.content }
+        val contents = JSONArray()
+        messages.filter { it.role != "system" }.forEach { turn ->
+            val role = if (turn.role == "assistant") "model" else "user"
+            contents.put(
+                JSONObject().put("role", role)
+                    .put("parts", JSONArray().put(JSONObject().put("text", turn.content))),
+            )
+        }
+        val body = JSONObject().put("contents", contents)
+        if (system.isNotBlank()) {
+            body.put("systemInstruction", JSONObject().put("parts", JSONArray().put(JSONObject().put("text", system))))
+        }
+        val url = "https://generativelanguage.googleapis.com/v1beta/models/$model:streamGenerateContent?alt=sse&key=$key"
+        val connection = (URL(url).openConnection() as HttpURLConnection).apply {
+            requestMethod = "POST"
+            connectTimeout = 20_000
+            readTimeout = 180_000
+            doOutput = true
+            setRequestProperty("Content-Type", "application/json")
+            setRequestProperty("Accept", "text/event-stream")
+        }
+        try {
+            connection.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
+            val code = connection.responseCode
+            if (code !in 200..299) {
+                val err = connection.errorStream?.bufferedReader()?.readText().orEmpty()
+                error("HTTP $code: ${err.take(400)}")
+            }
+            val text = StringBuilder()
+            BufferedReader(InputStreamReader(connection.inputStream, Charsets.UTF_8)).use { reader ->
+                while (true) {
+                    if (abort()) break
+                    val line = reader.readLine() ?: break
+                    if (!line.startsWith("data:")) continue
+                    val data = line.removePrefix("data:").trim()
+                    val json = runCatching { JSONObject(data) }.getOrNull() ?: continue
+                    val parts = json.optJSONArray("candidates")
+                        ?.optJSONObject(0)
+                        ?.optJSONObject("content")
+                        ?.optJSONArray("parts") ?: continue
+                    for (i in 0 until parts.length()) {
+                        val piece = parts.getJSONObject(i).optString("text")
+                        if (piece.isNotEmpty()) {
+                            text.append(piece)
+                            onDelta(StreamDelta(text = piece))
+                        }
+                    }
+                }
+            }
+            return ChatReply(text = text.toString(), model = model)
+        } finally {
+            connection.disconnect()
+        }
+    }
+
     private fun geminiKeys(): List<String> = listOf("gemini_key_1", "gemini_key_2", "gemini_key_3")
         .mapNotNull { secrets.get(it)?.takeIf { k -> k.isNotBlank() } }
 

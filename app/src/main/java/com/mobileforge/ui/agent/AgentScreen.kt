@@ -3,6 +3,7 @@ package com.mobileforge.ui.agent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -14,8 +15,11 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -36,16 +40,26 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import android.content.res.Configuration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.mobileforge.AppViewModel
 import com.mobileforge.BuildConfig
 import com.mobileforge.Section
-import com.mobileforge.agent.AgentCard
+import com.mobileforge.agent.AgentEvent
+import com.mobileforge.ui.assets.AssetsScreen
+import com.mobileforge.ui.cloud.CloudScreen
+import com.mobileforge.ui.mcp.McpScreen
+import com.mobileforge.ui.play.PlayScreen
+import com.mobileforge.ui.projects.ProjectsScreen
+import com.mobileforge.ui.settings.SettingsScreen
+import com.mobileforge.ui.studio.StudioScreen
+import com.mobileforge.ui.unity.UnityWorkspace
 import kotlinx.coroutines.delay
 
 private val Bg = Color(0xFF0C0C0E)
@@ -56,127 +70,251 @@ private val Mute = Color(0xFF8B8B93)
 private val Ink = Color(0xFFEDEDEF)
 private val Line = Color(0xFF2A2A30)
 private val CardBg = Color(0xFF16161A)
+private val UserBg = Color(0xFF16352F)
 private val Ok = Color(0xFF3DDC97)
 private val Bad = Color(0xFFFF6B7A)
+private val Think = Color(0xFF9AA0B5)
+
+private val tabs = listOf(
+    Section.Agent to ("✦" to "Агент"),
+    Section.Projects to ("▣" to "Проекты"),
+    Section.Studio to ("⌘" to "Редактор"),
+    Section.Assets to ("◇" to "Ассеты"),
+    Section.Play to ("▶" to "Play"),
+    Section.Cloud to ("☁" to "Cloud"),
+    Section.Mcp to ("⚒" to "MCP"),
+    Section.Ai to ("✎" to "Код"),
+    Section.Settings to ("⚙" to "Ещё"),
+)
 
 @Composable
 fun AgentScreen(vm: AppViewModel) {
     var tick by remember { mutableIntStateOf(0) }
-    LaunchedEffect(vm.agentRunning) {
+    LaunchedEffect(Unit) {
         while (true) {
             delay(1000)
             tick++
-            if (vm.agentRunning) vm.agentElapsed += 0
         }
     }
     val session = formatMin(vm.sessionElapsedMs() + tick * 0L)
     val left = formatMin(vm.sessionLeftMs())
     val limit = formatMin(vm.sessionLimitMs)
     Column(Modifier.fillMaxSize().background(Bg)) {
-        Row(
-            Modifier.fillMaxWidth().background(Bar).padding(horizontal = 14.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text("Zen", color = Teal, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
-            Spacer(Modifier.width(8.dp))
-            Text("Agent", color = Ink, fontSize = 20.sp, fontWeight = FontWeight.Medium)
-            Spacer(Modifier.width(12.dp))
-            ModelChip(vm)
-            Spacer(Modifier.weight(1f))
-            Box {
-                IconBtn("☰") { vm.agentMenu = true }
-                DropdownMenu(expanded = vm.agentMenu, onDismissRequest = { vm.agentMenu = false }) {
-                    listOf(
-                        Section.Studio to "Редактор Unity",
-                        Section.Projects to "Проекты",
-                        Section.Cloud to "Cloud / GitHub",
-                        Section.Mcp to "MCP",
-                        Section.Settings to "Настройки",
-                    ).forEach { (sec, label) ->
-                        DropdownMenuItem(text = { Text(label) }, onClick = { vm.agentMenu = false; vm.go(sec) })
-                    }
-                }
-            }
-            Spacer(Modifier.width(6.dp))
-            IconBtn("↓") { exportSession(vm) }
-            Spacer(Modifier.width(6.dp))
-            IconBtn("■", active = vm.agentRunning) { vm.stopAgent() }
-        }
-        Column(Modifier.fillMaxWidth().background(Bar).padding(start = 16.dp, end = 16.dp, bottom = 12.dp)) {
+        Column(Modifier.fillMaxWidth().background(Bar).padding(start = 12.dp, end = 12.dp, top = 10.dp, bottom = 6.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(8.dp).clip(CircleShape).background(if (vm.agentRunning) Teal else Ok))
+                Text("Zen", color = Teal, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.width(6.dp))
+                Text("Agent", color = Ink, fontSize = 18.sp)
                 Spacer(Modifier.width(8.dp))
-                Text(vm.agentStatus, color = Ink, fontSize = 13.sp)
+                ModelChip(vm)
+                Spacer(Modifier.weight(1f))
+                IconBtn("↓") { exportSession(vm) }
+                Spacer(Modifier.width(6.dp))
+                IconBtn("■", active = vm.agentRunning) { vm.stopAgent() }
+            }
+            Spacer(Modifier.height(6.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(7.dp).clip(CircleShape).background(if (vm.agentRunning) Teal else Ok))
+                Spacer(Modifier.width(6.dp))
+                Text(vm.agentStatus, color = Ink, fontSize = 12.sp)
                 Meta("раунд", if (vm.agentRound == 0) "—" else vm.agentRound.toString())
                 Meta("инстр.", vm.agentToolsUsed.toString())
                 Meta("токены", vm.agentTokens.toString())
-                Text("${vm.agentElapsed}с", color = Mute, fontSize = 13.sp, modifier = Modifier.padding(start = 10.dp))
+                Text(" ${vm.agentElapsed}с", color = Mute, fontSize = 12.sp)
             }
+            Text("сессия $session / $limit · осталось $left · ${BuildConfig.VERSION_NAME}", color = Mute, fontSize = 11.sp)
+        }
+        TabStrip(vm)
+        Box(Modifier.weight(1f).fillMaxWidth()) {
+            when (vm.section) {
+                Section.Agent -> ChatPane(vm)
+                Section.Projects -> ProjectsScreen(vm)
+                Section.Studio, Section.Ai -> {
+                    val land = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
+                    if (land) UnityWorkspace(vm) else StudioScreen(vm)
+                }
+                Section.Assets -> AssetsScreen(vm)
+                Section.Play -> PlayScreen(vm)
+                Section.Cloud -> CloudScreen(vm)
+                Section.Mcp -> McpScreen(vm)
+                Section.Settings -> SettingsScreen(vm)
+            }
+        }
+        if (vm.section == Section.Agent) InputBar(vm)
+        TabStrip(vm)
+    }
+}
+
+@Composable
+private fun TabStrip(vm: AppViewModel) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .background(Bar)
+            .horizontalScroll(rememberScrollState())
+            .padding(horizontal = 4.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        tabs.forEach { (sec, pair) ->
+            val (icon, label) = pair
+            val on = vm.section == sec
+            Column(
+                Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(if (on) Pill else Color.Transparent)
+                    .clickable {
+                        if (sec == Section.Play) vm.startPlay()
+                        vm.go(sec)
+                    }
+                    .padding(horizontal = 10.dp, vertical = 4.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Text(icon, color = if (on) Teal else Mute, fontSize = 14.sp)
+                Text(label, color = if (on) Ink else Mute, fontSize = 9.sp)
+            }
+        }
+    }
+}
+
+@Composable
+private fun ChatPane(vm: AppViewModel) {
+    val state = rememberLazyListState()
+    LaunchedEffect(vm.agentFeed.size, vm.streamTick) {
+        if (vm.agentFeed.isNotEmpty()) {
+            state.animateScrollToItem(vm.agentFeed.lastIndex)
+        }
+    }
+    if (vm.agentFeed.isEmpty()) {
+        Column(Modifier.fillMaxSize().padding(20.dp)) {
+            Text(
+                "Готов. Напишите задачу — своё сообщение останется в ленте, ответ и размышления пойдут стримом, инструменты карточками.",
+                color = Ink,
+                fontSize = 16.sp,
+                lineHeight = 24.sp,
+            )
+        }
+        return
+    }
+    LazyColumn(
+        state = state,
+        modifier = Modifier.fillMaxSize().padding(horizontal = 10.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        items(vm.agentFeed, key = { it.id }) { ev ->
+            when (ev) {
+                is AgentEvent.User -> UserBubble(ev.text)
+                is AgentEvent.Assistant -> AssistantBubble(ev)
+                is AgentEvent.Tool -> ToolCard(ev) { vm.toggleCard(ev.id) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun UserBubble(text: String) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+        Text(
+            text,
+            color = Ink,
+            fontSize = 15.sp,
+            modifier = Modifier
+                .widthIn(max = 320.dp)
+                .clip(RoundedCornerShape(16.dp))
+                .background(UserBg)
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+        )
+    }
+}
+
+@Composable
+private fun AssistantBubble(ev: AgentEvent.Assistant) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(CardBg)
+            .padding(12.dp),
+    ) {
+        if (ev.thinking.isNotBlank()) {
+            Text("размышление", color = Think, fontSize = 11.sp)
+            Text(ev.thinking, color = Think, fontSize = 13.sp, lineHeight = 18.sp)
             Spacer(Modifier.height(8.dp))
-            Text("сессия $session / $limit · осталось $left", color = Mute, fontSize = 13.sp)
-            Spacer(Modifier.height(4.dp))
-            Text("сборка ${BuildConfig.VERSION_CODE}.${BuildConfig.VERSION_NAME}", color = Mute, fontSize = 13.sp)
         }
-        if (vm.agentCards.isEmpty()) {
-            Column(Modifier.weight(1f).padding(22.dp)) {
-                Text(
-                    "Готов. Опишите задачу — каждый вызов инструмента появится здесь карточкой: что запущено, сколько заняло и что вернуло. Нажмите на карточку, чтобы раскрыть.",
-                    color = Ink,
-                    fontSize = 18.sp,
-                    lineHeight = 26.sp,
-                )
-                Spacer(Modifier.height(22.dp))
-                Text(
-                    "«Стоп» прерывает в любой момент. Агент сам создаёт проекты, файлы, сцены и управление — вы только ставите задачу.",
-                    color = Mute,
-                    fontSize = 16.sp,
-                    lineHeight = 24.sp,
-                )
-            }
+        if (ev.text.isNotBlank()) {
+            Text(ev.text, color = Ink, fontSize = 15.sp, lineHeight = 22.sp)
+        } else if (ev.live) {
+            Text("печатает…", color = Mute, fontSize = 13.sp)
+        }
+    }
+}
+
+@Composable
+private fun ToolCard(ev: AgentEvent.Tool, onToggle: () -> Unit) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(CardBg)
+            .border(1.dp, Line, RoundedCornerShape(14.dp))
+            .clickable(onClick = onToggle)
+            .padding(12.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(8.dp).clip(CircleShape).background(if (ev.ok) Ok else Bad))
+            Spacer(Modifier.width(8.dp))
+            Text(ev.title, color = Ink, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+            Spacer(Modifier.weight(1f))
+            Text("${ev.ms}ms", color = Mute, fontSize = 12.sp)
+        }
+        if (ev.expanded) {
+            Spacer(Modifier.height(8.dp))
+            Text(ev.args, color = Mute, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
+            Spacer(Modifier.height(6.dp))
+            Text(ev.result.take(2000), color = Ink, fontSize = 13.sp, fontFamily = FontFamily.Monospace)
         } else {
-            LazyColumn(
-                Modifier.weight(1f).padding(horizontal = 12.dp, vertical = 8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                items(vm.agentCards, key = { it.id }) { card -> ToolCard(card) { vm.toggleCard(card.id) } }
-            }
+            Text(ev.result.take(90).replace("\n", " "), color = Mute, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
         }
-        Row(
-            Modifier.fillMaxWidth().background(Bg).padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically,
+    }
+}
+
+@Composable
+private fun InputBar(vm: AppViewModel) {
+    Row(
+        Modifier.fillMaxWidth().background(Bg).padding(10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            Modifier
+                .weight(1f)
+                .height(48.dp)
+                .clip(RoundedCornerShape(24.dp))
+                .background(Pill)
+                .padding(horizontal = 16.dp),
+            contentAlignment = Alignment.CenterStart,
         ) {
-            Box(
-                Modifier
-                    .weight(1f)
-                    .height(48.dp)
-                    .clip(RoundedCornerShape(24.dp))
-                    .background(Pill)
-                    .padding(horizontal = 16.dp),
-                contentAlignment = Alignment.CenterStart,
-            ) {
-                if (vm.agentInput.isEmpty()) Text("Задача...", color = Mute, fontSize = 16.sp)
-                BasicTextField(
-                    value = vm.agentInput,
-                    onValueChange = { vm.agentInput = it },
-                    textStyle = TextStyle(color = Ink, fontSize = 16.sp),
-                    cursorBrush = SolidColor(Teal),
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                    keyboardActions = KeyboardActions(onSend = { vm.submitAgent() }),
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            }
-            Spacer(Modifier.width(10.dp))
-            Box(
-                Modifier
-                    .size(48.dp)
-                    .clip(CircleShape)
-                    .background(Teal)
-                    .clickable(enabled = !vm.agentRunning) { vm.submitAgent() },
-                contentAlignment = Alignment.Center,
-            ) {
-                Text("→", color = Color(0xFF06261F), fontSize = 22.sp, fontWeight = FontWeight.Bold)
-            }
+            if (vm.agentInput.isEmpty()) Text("Задача...", color = Mute, fontSize = 16.sp)
+            BasicTextField(
+                value = vm.agentInput,
+                onValueChange = { vm.agentInput = it },
+                textStyle = TextStyle(color = Ink, fontSize = 16.sp),
+                cursorBrush = SolidColor(Teal),
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                keyboardActions = KeyboardActions(onSend = { vm.submitAgent() }),
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+        Spacer(Modifier.width(10.dp))
+        Box(
+            Modifier
+                .size(48.dp)
+                .clip(CircleShape)
+                .background(Teal)
+                .clickable(enabled = !vm.agentRunning) { vm.submitAgent() },
+            contentAlignment = Alignment.Center,
+        ) {
+            Text("→", color = Color(0xFF06261F), fontSize = 22.sp, fontWeight = FontWeight.Bold)
         }
     }
 }
@@ -187,19 +325,19 @@ private fun ModelChip(vm: AppViewModel) {
     Box {
         Row(
             Modifier
-                .clip(RoundedCornerShape(20.dp))
-                .border(1.dp, Line, RoundedCornerShape(20.dp))
+                .clip(RoundedCornerShape(18.dp))
+                .border(1.dp, Line, RoundedCornerShape(18.dp))
                 .clickable { open = true }
-                .padding(horizontal = 12.dp, vertical = 8.dp),
+                .padding(horizontal = 10.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(prettyModel(vm.model), color = Ink, fontSize = 14.sp)
-            Text("  ↕", color = Mute, fontSize = 12.sp)
+            Text(prettyModel(vm.model), color = Ink, fontSize = 13.sp)
+            Text(" ↕", color = Mute, fontSize = 11.sp)
         }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
             listOf(
-                "zen" to listOf("laguna-s-2.1-free", "deepseek-v4-flash-free", "mimo-v2.5-free", "nemotron-3-ultra-free"),
-                "orca" to listOf("orcarouter/free", "deepseek/deepseek-v4-flash-free", "tencent/hy3-free"),
+                "zen" to listOf("laguna-s-2.1-free", "deepseek-v4-flash-free", "mimo-v2.5-free"),
+                "orca" to listOf("orcarouter/free", "deepseek/deepseek-v4-flash-free"),
                 "gemini" to listOf("gemini-2.0-flash", "gemini-2.0-flash-lite"),
             ).forEach { (prov, ids) ->
                 ids.forEach { id ->
@@ -217,75 +355,43 @@ private fun ModelChip(vm: AppViewModel) {
 private fun IconBtn(label: String, active: Boolean = false, onClick: () -> Unit) {
     Box(
         Modifier
-            .size(40.dp)
-            .clip(RoundedCornerShape(12.dp))
-            .border(1.dp, Line, RoundedCornerShape(12.dp))
+            .size(36.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .border(1.dp, Line, RoundedCornerShape(10.dp))
             .background(if (active) Pill else Color.Transparent)
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
-    ) { Text(label, color = Ink, fontSize = 16.sp) }
+    ) { Text(label, color = Ink, fontSize = 14.sp) }
 }
 
 @Composable
 private fun Meta(k: String, v: String) {
-    Text("  $k ", color = Mute, fontSize = 13.sp)
-    Text(v, color = Ink, fontSize = 13.sp)
-}
-
-@Composable
-private fun ToolCard(card: AgentCard, onToggle: () -> Unit) {
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
-            .background(CardBg)
-            .border(1.dp, Line, RoundedCornerShape(14.dp))
-            .clickable(onClick = onToggle)
-            .padding(12.dp),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(8.dp).clip(CircleShape).background(if (card.ok) Ok else Bad))
-            Spacer(Modifier.width(8.dp))
-            Text(card.title, color = Ink, fontSize = 15.sp, fontWeight = FontWeight.Medium)
-            Spacer(Modifier.weight(1f))
-            Text("${card.ms}ms", color = Mute, fontSize = 12.sp)
-        }
-        if (card.expanded) {
-            Spacer(Modifier.height(8.dp))
-            Text(card.args, color = Mute, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
-            Spacer(Modifier.height(6.dp))
-            Text(card.result.take(2000), color = Ink, fontSize = 13.sp, fontFamily = FontFamily.Monospace)
-        } else {
-            Text(card.result.take(80).replace("\n", " "), color = Mute, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
-        }
-    }
+    Text("  $k ", color = Mute, fontSize = 12.sp)
+    Text(v, color = Ink, fontSize = 12.sp)
 }
 
 private fun prettyModel(id: String): String = when {
     id.contains("laguna", true) -> "Laguna S 2.1"
-    id.contains("deepseek-v4-flash-free") -> "DeepSeek Flash free"
     id.contains("deepseek") -> "DeepSeek Flash"
-    id.contains("mimo") -> "MiMo V2.5"
-    id.contains("nemotron") -> "Nemotron 3"
-    id.contains("north") -> "North Mini"
-    id.contains("orcarouter/free") || id == "auto" -> "Orca Free"
-    id.contains("orcarouter") -> "Orca"
-    id.contains("gemini-2.0-flash-lite") -> "Gemini Flash Lite"
-    id.contains("gemini-2.0") -> "Gemini 2.0 Flash"
-    id.contains("gemini") -> "Gemini"
-    else -> id.substringAfterLast('/').take(22)
+    id.contains("mimo") -> "MiMo"
+    id.contains("orcarouter/free") -> "Orca Free"
+    id.contains("gemini-2.0-flash-lite") -> "Gemini Lite"
+    id.contains("gemini") -> "Gemini Flash"
+    else -> id.substringAfterLast('/').take(18)
 }
 
 private fun formatMin(ms: Long): String {
     val total = (ms / 60000).toInt()
-    val h = total / 60
-    val m = total % 60
-    return "${h}ч ${m}м"
+    return "${total / 60}ч ${total % 60}м"
 }
 
 private fun exportSession(vm: AppViewModel) {
-    val text = vm.agentCards.asReversed().joinToString("\n\n") {
-        "## ${it.title} (${it.ms}ms)\n${it.args}\n${it.result}"
+    val text = vm.agentFeed.joinToString("\n\n") { ev ->
+        when (ev) {
+            is AgentEvent.User -> "USER: ${ev.text}"
+            is AgentEvent.Assistant -> "THINK:\n${ev.thinking}\n\nASSISTANT:\n${ev.text}"
+            is AgentEvent.Tool -> "TOOL ${ev.title} (${ev.ms}ms)\n${ev.result}"
+        }
     }.ifBlank { "empty session" }
     vm.importText = text
     vm.dialog = "export"
