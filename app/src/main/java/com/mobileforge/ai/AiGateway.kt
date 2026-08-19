@@ -46,6 +46,16 @@ class AiGateway(private val secrets: SecretStore) {
                     is AiResult.Failure -> error(r.message)
                 }
             }
+            Provider.ORCA -> chat(
+                endpoint = "https://api.orcarouter.ai/v1/chat/completions",
+                key = secrets.get("orca_key"),
+                model = if (model.isBlank() || model.contains("laguna", true) || model.contains("free")) {
+                    "orcarouter/auto"
+                } else model,
+                messages = messages,
+                title = "Orca",
+            )
+            Provider.GEMINI -> geminiChat(model, messages)
             Provider.CUSTOM -> {
                 val endpoint = customEndpoint.ifBlank { secrets.get("custom_endpoint").orEmpty() }
                 require(endpoint.startsWith("https://")) { "Custom endpoint must use HTTPS" }
