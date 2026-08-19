@@ -6,4 +6,5 @@ data class ChatReply(
     val text: String,
     val promptTokens: Int = 0,
     val completionTokens: Int = 0,
+    val model: String = "",
 )

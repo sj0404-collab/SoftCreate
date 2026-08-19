@@ -12,8 +12,8 @@ android {
         applicationId = "com.mobileforge"
         minSdk = 26
         targetSdk = 35
-        versionCode = 23
-        versionName = "2.2.0"
+        versionCode = 24
+        versionName = "2.2.1"
     }
 
     buildTypes {

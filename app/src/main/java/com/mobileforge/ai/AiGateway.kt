@@ -31,14 +31,7 @@ class AiGateway(private val secrets: SecretStore) {
         customEndpoint: String = "",
     ): Result<ChatReply> = runCatching {
         when (provider) {
-            Provider.ZEN_DIRECT -> chat(
-                endpoint = "https://opencode.ai/zen/v1/chat/completions",
-                key = secrets.get("zen_key"),
-                model = model,
-                messages = messages,
-                title = "Zen",
-                requireKey = false,
-            )
+            Provider.ZEN_DIRECT -> zenChat(model, messages)
             Provider.OPENROUTER -> chat(
                 endpoint = "https://openrouter.ai/api/v1/chat/completions",
                 key = secrets.get("openrouter_key"),
@@ -58,6 +51,46 @@ class AiGateway(private val secrets: SecretStore) {
                 require(endpoint.startsWith("https://")) { "Custom endpoint must use HTTPS" }
                 chat(endpoint, secrets.get("custom_key"), model, messages, "Custom")
             }
+        }
+    }
+
+    private fun zenChat(preferred: String, messages: List<ChatTurn>): ChatReply {
+        val queue = (listOf(preferred) + ZEN_FREE).distinct()
+        var last: Exception? = null
+        for (candidate in queue) {
+            repeat(3) { attempt ->
+                try {
+                    return chat(
+                        endpoint = "https://opencode.ai/zen/v1/chat/completions",
+                        key = secrets.get("zen_key"),
+                        model = candidate,
+                        messages = messages,
+                        title = "Zen",
+                        requireKey = false,
+                    ).copy(model = candidate)
+                } catch (e: Exception) {
+                    last = e
+                    if (!isTransient(e)) throw e
+                    Thread.sleep(900L * (attempt + 1))
+                }
+            }
+        }
+        throw last ?: IllegalStateException("Zen недоступен")
+    }
+
+    companion object {
+        val ZEN_FREE = listOf(
+            "laguna-s-2.1-free",
+            "deepseek-v4-flash-free",
+            "mimo-v2.5-free",
+            "nemotron-3-ultra-free",
+            "north-mini-code-free",
+            "deepseek-v4-flash",
+        )
+
+        fun isTransient(e: Throwable): Boolean {
+            val m = e.message.orEmpty().lowercase()
+            return listOf("502", "503", "504", "unavailable", "timeout", "upstream").any { it in m }
         }
     }
 

@@ -802,8 +802,16 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     val reply = withContext(Dispatchers.IO) {
                         ai.converse(Provider.fromId(provider), customModel.ifBlank { model }, messages, customEndpoint)
                     }.getOrElse {
-                        pushCard("ошибка", "error", "{}", it.message ?: "fail", 0, false)
+                        val msg = it.message ?: "fail"
+                        val human = if (com.mobileforge.ai.AiGateway.isTransient(it)) {
+                            "Zen временно недоступен (upstream 503). Проект уже создан — отправьте задачу ещё раз."
+                        } else msg
+                        pushCard("ошибка", "error", "{}", human, 0, false)
                         return@launch
+                    }
+                    if (reply.model.isNotBlank() && reply.model != model) {
+                        model = reply.model
+                        pushCard("модель", "fallback", "{}", "переключил на ${reply.model}", 0, true)
                     }
                     agentTokens += reply.promptTokens + reply.completionTokens
                     messages += ChatTurn("assistant", reply.text)
