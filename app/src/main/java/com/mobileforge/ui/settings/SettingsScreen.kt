@@ -37,8 +37,8 @@ fun SettingsScreen(vm: AppViewModel) {
             "Settings",
             "Ключи шифруются в Android Keystore (AES-GCM). Версия ${BuildConfig.VERSION_NAME}. UI полностью нативный.",
         )
-        KeyRow("Zen API key", vm.hasZen)
-        MfField(vm.zenKey, { vm.zenKey = it }, "sk-…", password = true)
+        KeyRow("Zen API key (не нужен для free-линейки)", vm.hasZen)
+        MfField(vm.zenKey, { vm.zenKey = it }, "опционально · free модели Zen без ключа", password = true)
         KeyRow("OpenRouter API key", vm.hasOr)
         MfField(vm.orKey, { vm.orKey = it }, "sk-or-…", password = true)
         KeyRow("Local MCP token", vm.hasMcp)

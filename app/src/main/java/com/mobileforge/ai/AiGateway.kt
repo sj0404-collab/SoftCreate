@@ -23,6 +23,7 @@ class AiGateway(private val secrets: SecretStore) {
                     model = model,
                     prompt = prompt,
                     title = "Zen",
+                    requireKey = false,
                 )
                 Provider.OPENROUTER -> chat(
                     endpoint = "https://openrouter.ai/api/v1/chat/completions",
@@ -67,8 +68,9 @@ class AiGateway(private val secrets: SecretStore) {
         model: String,
         prompt: String,
         title: String,
+        requireKey: Boolean = true,
     ): AiResult {
-        if (key.isNullOrBlank()) {
+        if (requireKey && key.isNullOrBlank()) {
             return AiResult.Failure("$title API key is not configured")
         }
         val body = JSONObject()
@@ -81,7 +83,8 @@ class AiGateway(private val secrets: SecretStore) {
             )
             .put("stream", false)
             .toString()
-        val response = post(endpoint, body, "Bearer $key")
+        val auth = if (key.isNullOrBlank()) null else "Bearer $key"
+        val response = post(endpoint, body, auth)
         val json = JSONObject(response)
         if (json.has("error")) {
             val error = json.optJSONObject("error")
@@ -119,14 +122,16 @@ class AiGateway(private val secrets: SecretStore) {
         return AiResult.Success(output)
     }
 
-    private fun post(endpoint: String, body: String, authorization: String): String {
+    private fun post(endpoint: String, body: String, authorization: String?): String {
         val connection = (URL(endpoint).openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
             connectTimeout = 20_000
             readTimeout = 90_000
             doOutput = true
             setRequestProperty("Content-Type", "application/json")
-            setRequestProperty("Authorization", authorization)
+            if (!authorization.isNullOrBlank()) {
+                setRequestProperty("Authorization", authorization)
+            }
             setRequestProperty("Accept", "application/json")
             if (endpoint.contains("openrouter.ai")) {
                 setRequestProperty("HTTP-Referer", "https://mobileforge.local")
