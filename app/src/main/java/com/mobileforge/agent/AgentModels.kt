@@ -43,16 +43,19 @@ data class AgentAction(
 
 object AgentParser {
     fun parse(raw: String): AgentAction {
-        val json = extractJson(raw) ?: return AgentAction(null, JSONObject(), true, raw.trim())
+        val cleaned = raw.replace(Regex("(?:null){2,}"), "")
+        val json = extractJson(cleaned) ?: return AgentAction(null, JSONObject(), true, cleaned.trim())
         val done = json.optBoolean("done") || json.optString("tool") == "done"
-        val tool = json.optString("tool").ifBlank { null }
+        val tool = if (json.isNull("tool")) null else json.optString("tool").takeIf { it.isNotBlank() && it != "null" }
         val args = json.optJSONObject("args") ?: JSONObject()
         json.keys().forEach { key ->
             if (key != "tool" && key != "args" && key != "done" && key != "say") {
                 if (!args.has(key)) args.put(key, json.get(key))
             }
         }
-        val say = json.optString("say").ifBlank { json.optString("message") }
+        val say = listOf("say", "message").firstNotNullOfOrNull { key ->
+            if (json.isNull(key)) null else json.optString(key).takeIf { it.isNotBlank() && it != "null" }
+        }.orEmpty()
         return AgentAction(tool, args, done, say)
     }
 
@@ -68,7 +71,7 @@ object AgentParser {
 
     const val SYSTEM = """
 You are MobileForge Agent on the user's phone. You DO the work by calling tools.
-Reply with ONE JSON object only, no markdown.
+Reply with ONE JSON object only, no markdown, no extra text, never the word null.
 To call a tool: {"tool":"NAME","args":{...}}
 When finished: {"done":true,"say":"short summary"}
 

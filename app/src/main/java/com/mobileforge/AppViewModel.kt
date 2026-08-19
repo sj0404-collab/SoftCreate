@@ -14,7 +14,9 @@ import com.mobileforge.agent.AgentParser
 import com.mobileforge.ai.AiGateway
 import com.mobileforge.ai.AiResult
 import com.mobileforge.ai.ChatTurn
+import com.mobileforge.ai.ModelCatalog
 import com.mobileforge.ai.Provider
+import com.mobileforge.ai.StreamText
 import com.mobileforge.cloud.GhAccount
 import com.mobileforge.cloud.GhRepo
 import com.mobileforge.cloud.GhRun
@@ -137,17 +139,16 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun sessionLeftMs(): Long = (sessionLimitMs - sessionElapsedMs()).coerceAtLeast(0)
 
     val models: List<String>
-        get() {
-            val preset = when (provider) {
-                "zen" -> listOf("laguna-s-2.1-free", "deepseek-v4-flash-free", "mimo-v2.5-free", "nemotron-3-ultra-free", "north-mini-code-free", "deepseek-v4-flash")
-                "openrouter" -> listOf("openrouter/free", "google/gemma-3-27b-it:free", "meta-llama/llama-3.3-70b-instruct:free", "qwen/qwen3-30b-a3b:free")
-                "orca" -> listOf("orcarouter/free", "deepseek/deepseek-v4-flash-free", "tencent/hy3-free", "deepseek/deepseek-v4-pro-free")
-                "gemini" -> listOf("gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-1.5-flash")
-                "mcp" -> listOf("Termux local agent model")
-                else -> emptyList()
-            }
-            return (preset + listOfNotNull(customModel.ifBlank { null })).distinct()
-        }
+        get() = (ModelCatalog.idsFor(provider) + listOfNotNull(customModel.ifBlank { null })).distinct()
+
+    fun setRoute(nextProvider: String, nextModel: String) {
+        provider = nextProvider
+        model = nextModel
+        prefs.edit()
+            .putString("ai_provider", nextProvider)
+            .putString("${nextProvider}_model", nextModel)
+            .apply()
+    }
 
     init {
         refreshProjects()
@@ -157,8 +158,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         refreshPack()
         boundRepo = prefs.getString("gh_bound_repo", "").orEmpty()
         customEndpoint = prefs.getString("custom_endpoint", "").orEmpty()
-        model = prefs.getString("${provider}_model", model).orEmpty().ifBlank { model }
-        log("MobileForge 2.0 — телефон = превью/редактор, сборка = GitHub runner")
+        provider = prefs.getString("ai_provider", "zen").orEmpty().ifBlank { "zen" }
+        model = prefs.getString("${provider}_model", ModelCatalog.defaultId(provider))
+            .orEmpty().ifBlank { ModelCatalog.defaultId(provider) }
+        log("MobileForge 2.4 — телефон = превью/редактор, сборка = GitHub runner")
     }
 
     fun notify(text: String) {
@@ -840,30 +843,55 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                                 val idx = agentFeed.indexOfFirst { it.id == liveId }
                                 if (idx >= 0) {
                                     val cur = agentFeed[idx] as? AgentEvent.Assistant ?: return@post
-                                    agentFeed[idx] = cur.copy(
-                                        text = cur.text + delta.text,
-                                        thinking = cur.thinking + delta.thinking,
-                                        live = true,
-                                    )
+                                    if (delta.reset) {
+                                        agentFeed[idx] = cur.copy(text = "", thinking = "", live = true)
+                                    } else {
+                                        val piece = StreamText.clean(delta.text)
+                                        val reason = StreamText.clean(delta.thinking)
+                                        if (piece.isEmpty() && reason.isEmpty()) return@post
+                                        agentFeed[idx] = cur.copy(
+                                            text = StreamText.stripNullSpam(cur.text + piece),
+                                            thinking = StreamText.stripNullSpam(cur.thinking + reason),
+                                            live = true,
+                                        )
+                                    }
                                     streamTick++
                                 }
                             }
                         }
                     }.getOrElse {
-                        val msg = it.message ?: "fail"
-                        val human = if (com.mobileforge.ai.AiGateway.isTransient(it)) {
-                            "Zen временно недоступен (upstream 503). Проект уже создан — отправьте задачу ещё раз."
-                        } else msg
-                        pushCard("ошибка", "error", "{}", human, 0, false)
+                        pushCard("ошибка", "error", "{}", StreamText.humanError(it), 0, false)
                         return@launch
                     }
-                    if (reply.model.isNotBlank() && reply.model != model) {
-                        model = reply.model
-                        pushCard("модель", "fallback", "{}", "переключил на ${reply.model}", 0, true)
+                    if (reply.provider.isNotBlank() || (reply.model.isNotBlank() && reply.model != model)) {
+                        val nextProv = reply.provider.ifBlank { provider }.let {
+                            if (it == "zen_direct" || it == "zendirect") "zen" else it
+                        }
+                        if (nextProv != provider || (reply.model.isNotBlank() && reply.model != model)) {
+                            setRoute(nextProv, reply.model.ifBlank { model })
+                            pushCard("модель", "fallback", "{}", "переключил на ${ModelCatalog.pretty(model)} · $nextProv", 0, true)
+                        }
                     }
                     agentTokens += reply.promptTokens + reply.completionTokens
-                    messages += ChatTurn("assistant", reply.text)
-                    val action = AgentParser.parse(reply.text)
+                    val raw = StreamText.stripNullSpam(reply.text.ifBlank { reply.thinking })
+                    messages += ChatTurn("assistant", raw)
+                    val action = AgentParser.parse(raw)
+                    withContext(Dispatchers.Main) {
+                        val idx = agentFeed.indexOfFirst { it.id == liveId }
+                        if (idx >= 0) {
+                            val cur = agentFeed[idx] as? AgentEvent.Assistant
+                            if (cur != null) {
+                                val think = StreamText.stripNullSpam(cur.thinking.ifBlank { reply.thinking })
+                                val shown = when {
+                                    action.tool != null -> ""
+                                    action.done && action.say.isNotBlank() -> action.say
+                                    else -> StreamText.stripNullSpam(cur.text.ifBlank { reply.text })
+                                }
+                                agentFeed[idx] = cur.copy(text = shown, thinking = think, live = false)
+                                streamTick++
+                            }
+                        }
+                    }
                     if (action.done && action.tool == null) {
                         pushCard("готово", "done", "{}", action.say.ifBlank { reply.text }, 0, true)
                         break

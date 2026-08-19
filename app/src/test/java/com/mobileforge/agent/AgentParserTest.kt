@@ -19,4 +19,12 @@ class AgentParserTest {
         assertTrue(action.done)
         assertEquals("ok", action.say)
     }
+
+    @Test
+    fun stripsNullSpamBeforeJson() {
+        val action = AgentParser.parse(
+            "inspect.nullnullnullnull{\"tool\":\"fs.list\",\"args\":{}}",
+        )
+        assertEquals("fs.list", action.tool)
+    }
 }

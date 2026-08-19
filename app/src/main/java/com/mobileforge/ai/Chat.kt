@@ -8,9 +8,11 @@ data class ChatReply(
     val completionTokens: Int = 0,
     val model: String = "",
     val thinking: String = "",
+    val provider: String = "",
 )
 
 data class StreamDelta(
     val text: String = "",
     val thinking: String = "",
+    val reset: Boolean = false,
 )

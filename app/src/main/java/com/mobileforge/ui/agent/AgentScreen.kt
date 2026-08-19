@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -52,6 +53,8 @@ import com.mobileforge.AppViewModel
 import com.mobileforge.BuildConfig
 import com.mobileforge.Section
 import com.mobileforge.agent.AgentEvent
+import com.mobileforge.ai.ModelCatalog
+import com.mobileforge.ai.StreamText
 import com.mobileforge.ui.assets.AssetsScreen
 import com.mobileforge.ui.cloud.CloudScreen
 import com.mobileforge.ui.mcp.McpScreen
@@ -236,13 +239,15 @@ private fun AssistantBubble(ev: AgentEvent.Assistant) {
             .background(CardBg)
             .padding(12.dp),
     ) {
-        if (ev.thinking.isNotBlank()) {
+        val think = StreamText.stripNullSpam(ev.thinking)
+        val body = StreamText.stripNullSpam(ev.text)
+        if (think.isNotBlank()) {
             Text("размышление", color = Think, fontSize = 11.sp)
-            Text(ev.thinking, color = Think, fontSize = 13.sp, lineHeight = 18.sp)
+            Text(think, color = Think, fontSize = 13.sp, lineHeight = 18.sp)
             Spacer(Modifier.height(8.dp))
         }
-        if (ev.text.isNotBlank()) {
-            Text(ev.text, color = Ink, fontSize = 15.sp, lineHeight = 22.sp)
+        if (body.isNotBlank()) {
+            Text(body, color = Ink, fontSize = 15.sp, lineHeight = 22.sp)
         } else if (ev.live) {
             Text("печатает…", color = Mute, fontSize = 13.sp)
         }
@@ -331,19 +336,44 @@ private fun ModelChip(vm: AppViewModel) {
                 .padding(horizontal = 10.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(prettyModel(vm.model), color = Ink, fontSize = 13.sp)
+            Text(ModelCatalog.pretty(vm.model), color = Ink, fontSize = 13.sp)
             Text(" ↕", color = Mute, fontSize = 11.sp)
         }
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-            listOf(
-                "zen" to listOf("laguna-s-2.1-free", "deepseek-v4-flash-free", "mimo-v2.5-free"),
-                "orca" to listOf("orcarouter/free", "deepseek/deepseek-v4-flash-free"),
-                "gemini" to listOf("gemini-2.0-flash", "gemini-2.0-flash-lite"),
-            ).forEach { (prov, ids) ->
-                ids.forEach { id ->
+        DropdownMenu(
+            expanded = open,
+            onDismissRequest = { open = false },
+            modifier = Modifier.heightIn(max = 420.dp),
+        ) {
+            ModelCatalog.groups.forEach { (title, models) ->
+                DropdownMenuItem(
+                    text = { Text(title, color = Mute, fontSize = 11.sp, fontWeight = FontWeight.SemiBold) },
+                    onClick = {},
+                    enabled = false,
+                )
+                models.forEach { item ->
+                    val locked = item.needKey && when (item.providerId) {
+                        "openrouter" -> !vm.hasOr
+                        "orca" -> !vm.hasOrca
+                        "gemini" -> !vm.hasGemini
+                        "zen" -> !item.free && !vm.hasZen
+                        else -> false
+                    }
                     DropdownMenuItem(
-                        text = { Text("${prettyModel(id)} · $prov") },
-                        onClick = { vm.provider = prov; vm.model = id; open = false },
+                        text = {
+                            Text(
+                                buildString {
+                                    append(item.label)
+                                    if (item.free) append(" · free") else append(" · $")
+                                    if (locked) append(" · ключ")
+                                },
+                                fontSize = 13.sp,
+                            )
+                        },
+                        onClick = {
+                            vm.setRoute(item.providerId, item.id)
+                            open = false
+                            if (locked) vm.notify("Ключ ${item.providerId} — вкладка Ещё")
+                        },
                     )
                 }
             }
@@ -368,16 +398,6 @@ private fun IconBtn(label: String, active: Boolean = false, onClick: () -> Unit)
 private fun Meta(k: String, v: String) {
     Text("  $k ", color = Mute, fontSize = 12.sp)
     Text(v, color = Ink, fontSize = 12.sp)
-}
-
-private fun prettyModel(id: String): String = when {
-    id.contains("laguna", true) -> "Laguna S 2.1"
-    id.contains("deepseek") -> "DeepSeek Flash"
-    id.contains("mimo") -> "MiMo"
-    id.contains("orcarouter/free") -> "Orca Free"
-    id.contains("gemini-2.0-flash-lite") -> "Gemini Lite"
-    id.contains("gemini") -> "Gemini Flash"
-    else -> id.substringAfterLast('/').take(18)
 }
 
 private fun formatMin(ms: Long): String {

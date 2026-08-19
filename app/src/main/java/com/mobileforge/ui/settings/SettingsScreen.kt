@@ -39,8 +39,8 @@ fun SettingsScreen(vm: AppViewModel) {
         )
         KeyRow("Zen API key (не нужен для free-линейки)", vm.hasZen)
         MfField(vm.zenKey, { vm.zenKey = it }, "опционально · free модели Zen без ключа", password = true)
-        KeyRow("OpenRouter API key", vm.hasOr)
-        MfField(vm.orKey, { vm.orKey = it }, "sk-or-…", password = true)
+        KeyRow("OpenRouter API key (free :free и платные)", vm.hasOr)
+        MfField(vm.orKey, { vm.orKey = it }, "sk-or-v1-…  бесплатный аккаунт открывает :free", password = true)
         KeyRow("Local MCP token", vm.hasMcp)
         MfField(vm.mcpKey, { vm.mcpKey = it }, "Bearer token", password = true)
         KeyRow("Custom API key", vm.hasCustom)
@@ -62,10 +62,15 @@ fun SettingsScreen(vm: AppViewModel) {
             Text("• ${p.title}: ${p.summary}", color = MfMuted, fontSize = 12.sp)
         }
         Text(
-            "Сборка APK — GitHub Actions, не телефон. Несколько PAT: вкладка Cloud.",
+            "Чип моделей: Zen free без ключа. OpenRouter :free и paid — ключ выше. Orca/Gemini — свои ключи. Ключи только в Keystore, не в APK.",
             color = MfMuted,
             fontSize = 12.sp,
             modifier = Modifier.padding(top = 8.dp),
+        )
+        Text(
+            "Сборка APK — GitHub Actions, не телефон. Несколько PAT: вкладка Cloud.",
+            color = MfMuted,
+            fontSize = 12.sp,
         )
     }
 }

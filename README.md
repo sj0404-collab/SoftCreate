@@ -1,4 +1,4 @@
-# MobileForge 2.1
+# MobileForge 2.4
 
 Вертикально — AI и код. Горизонтально — панели Unity (Hierarchy / Scene / Inspector / Project / Console) с живыми данными.
 
@@ -16,13 +16,14 @@
 - Cloud: несколько GitHub PAT/аккаунтов, список репо, создание репо, push проекта, `workflow_dispatch`
 - MCP Workbench: локальные professional tools + HTTPS/localhost серверы
 - AI: Create / Change / Delete / Explain → Review → Apply
+- Модели: Zen free (без ключа), OpenRouter :free и paid, Orca, Gemini. Ключи только в Keystore.
 
 ## На runner
 
 `./gradlew assembleDebug` генерирует `StudioPack` (~60–90 MB текстур/heightmaps/аудио) и пакует APK 50–100 MB.
 
 ```
-workflow_dispatch / push main → artifact MobileForge-2.0.0-debug
+workflow_dispatch / push main → artifact MobileForge-2.4.0-debug
 ```
 
 ## Безопасность

@@ -35,7 +35,7 @@ class AiGateway(private val secrets: SecretStore) {
             Provider.OPENROUTER -> chat(
                 endpoint = "https://openrouter.ai/api/v1/chat/completions",
                 key = secrets.get("openrouter_key"),
-                model = model,
+                model = ModelCatalog.remap(Provider.OPENROUTER, model),
                 messages = messages,
                 title = "OpenRouter",
             )
@@ -49,9 +49,7 @@ class AiGateway(private val secrets: SecretStore) {
             Provider.ORCA -> chat(
                 endpoint = "https://api.orcarouter.ai/v1/chat/completions",
                 key = secrets.get("orca_key"),
-                model = if (model.isBlank() || model.contains("laguna", true) || model == "auto" || model.endsWith("/auto")) {
-                    "orcarouter/free"
-                } else model,
+                model = ModelCatalog.remap(Provider.ORCA, model),
                 messages = messages,
                 title = "Orca",
             )
@@ -65,10 +63,14 @@ class AiGateway(private val secrets: SecretStore) {
     }
 
     private fun zenChat(preferred: String, messages: List<ChatTurn>): ChatReply {
-        val queue = (listOf(preferred) + ZEN_FREE).distinct()
+        val queue = if (preferred == "auto" || preferred.isBlank()) {
+            ModelCatalog.zenFreeIds()
+        } else {
+            (listOf(ModelCatalog.remap(Provider.ZEN_DIRECT, preferred)) + ModelCatalog.zenFreeIds()).distinct()
+        }
         var last: Exception? = null
         for (candidate in queue) {
-            repeat(3) { attempt ->
+            repeat(2) { attempt ->
                 try {
                     return chat(
                         endpoint = "https://opencode.ai/zen/v1/chat/completions",
@@ -77,11 +79,14 @@ class AiGateway(private val secrets: SecretStore) {
                         messages = messages,
                         title = "Zen",
                         requireKey = false,
-                    ).copy(model = candidate)
+                    ).copy(model = candidate, provider = "zen")
                 } catch (e: Exception) {
                     last = e
-                    if (!isTransient(e)) throw e
-                    Thread.sleep(900L * (attempt + 1))
+                    if (!StreamText.retryable(e)) {
+                        if (StreamText.hostDead(e)) throw e
+                        break
+                    }
+                    Thread.sleep(500L * (attempt + 1))
                 }
             }
         }
@@ -94,21 +99,23 @@ class AiGateway(private val secrets: SecretStore) {
         messages: List<ChatTurn>,
         customEndpoint: String = "",
     ): Result<ChatReply> {
-        val order = buildList {
-            add(preferred)
-            if (secrets.has("orca_key")) add(Provider.ORCA)
-            if (geminiKeys().isNotEmpty()) add(Provider.GEMINI)
-            add(Provider.ZEN_DIRECT)
-        }.distinct()
+        val routes = ModelCatalog.plan(preferred, model, ::hasProvider)
         var last: Throwable? = null
-        for (p in order) {
-            val result = converse(p, model, messages, customEndpoint)
+        val skip = mutableSetOf<Provider>()
+        for ((provider, id) in routes) {
+            if (provider in skip) continue
+            val result = converse(provider, id, messages, customEndpoint)
             if (result.isSuccess) {
-                return result.map { it.copy(model = it.model.ifBlank { "${p.name}:$model" }) }
+                return result.map {
+                    it.copy(
+                        model = it.model.ifBlank { id },
+                        provider = ModelCatalog.idOf(provider),
+                    )
+                }
             }
             last = result.exceptionOrNull()
-            if (last != null && !isTransient(last) && p == preferred && p != Provider.ZEN_DIRECT) {
-                // still try fallbacks on hard fail of preferred if others exist
+            if (last != null && (StreamText.hostDead(last) || StreamText.badKey(last))) {
+                skip += provider
             }
         }
         return Result.failure(last ?: IllegalStateException("Все провайдеры недоступны"))
@@ -122,18 +129,74 @@ class AiGateway(private val secrets: SecretStore) {
         abort: () -> Boolean = { false },
         onDelta: (StreamDelta) -> Unit,
     ): Result<ChatReply> {
-        val streamed = runCatching {
-            when (provider) {
-                Provider.GEMINI -> geminiStream(model, messages, abort, onDelta)
-                Provider.LOCAL_MCP -> converse(provider, model, messages, customEndpoint).getOrThrow()
-                else -> {
-                    val (endpoint, key, requireKey, resolved) = endpointFor(provider, model, customEndpoint)
-                    streamChat(endpoint, key, resolved, messages, requireKey, abort, onDelta)
+        val routes = ModelCatalog.plan(provider, model, ::hasProvider)
+        var last: Throwable? = null
+        val skip = mutableSetOf<Provider>()
+        var started = false
+        for ((routeProvider, routeModel) in routes) {
+            if (abort()) break
+            if (routeProvider in skip) continue
+            if (started) onDelta(StreamDelta(reset = true))
+            started = true
+            val streamed = runCatching {
+                when (routeProvider) {
+                    Provider.GEMINI -> geminiStream(routeModel, messages, abort, onDelta)
+                    Provider.LOCAL_MCP -> converse(routeProvider, routeModel, messages, customEndpoint).getOrThrow()
+                    else -> {
+                        val route = endpointFor(routeProvider, routeModel, customEndpoint)
+                        streamChat(route.endpoint, route.key, route.model, messages, route.requireKey, abort, onDelta)
+                    }
+                }
+            }
+            if (streamed.isSuccess) {
+                val reply = streamed.getOrThrow()
+                val text = StreamText.stripNullSpam(reply.text)
+                val think = StreamText.stripNullSpam(reply.thinking)
+                if (text.isNotBlank() || think.isNotBlank()) {
+                    return Result.success(
+                        reply.copy(
+                            text = text,
+                            thinking = think,
+                            model = routeModel,
+                            provider = ModelCatalog.idOf(routeProvider),
+                        ),
+                    )
+                }
+                val plain = converse(routeProvider, routeModel, messages, customEndpoint)
+                if (plain.isSuccess) {
+                    return plain.map {
+                        it.copy(model = routeModel, provider = ModelCatalog.idOf(routeProvider))
+                    }
+                }
+                last = plain.exceptionOrNull() ?: IllegalStateException("empty stream")
+            } else {
+                last = streamed.exceptionOrNull()
+                val err = last
+                if (err != null && (StreamText.hostDead(err) || StreamText.badKey(err))) {
+                    skip += routeProvider
+                }
+                val msg = err?.message.orEmpty().lowercase()
+                if ("stream" in msg && ("400" in msg || "unsupported" in msg)) {
+                    val plain = converse(routeProvider, routeModel, messages, customEndpoint)
+                    if (plain.isSuccess) {
+                        return plain.map {
+                            it.copy(model = routeModel, provider = ModelCatalog.idOf(routeProvider))
+                        }
+                    }
+                    last = plain.exceptionOrNull() ?: err
                 }
             }
         }
-        if (streamed.isSuccess) return streamed
-        return converseResilient(provider, model, messages, customEndpoint)
+        return Result.failure(last ?: IllegalStateException("Все провайдеры недоступны"))
+    }
+
+    private fun hasProvider(provider: Provider): Boolean = when (provider) {
+        Provider.ZEN_DIRECT -> true
+        Provider.OPENROUTER -> !secrets.get("openrouter_key").isNullOrBlank()
+        Provider.ORCA -> !secrets.get("orca_key").isNullOrBlank()
+        Provider.GEMINI -> geminiKeys().isNotEmpty()
+        Provider.CUSTOM -> !secrets.get("custom_key").isNullOrBlank()
+        Provider.LOCAL_MCP -> !secrets.get("mcp_token").isNullOrBlank()
     }
 
     private data class Route(val endpoint: String, val key: String?, val requireKey: Boolean, val model: String)
@@ -143,19 +206,19 @@ class AiGateway(private val secrets: SecretStore) {
             "https://opencode.ai/zen/v1/chat/completions",
             secrets.get("zen_key"),
             false,
-            model,
+            ModelCatalog.remap(Provider.ZEN_DIRECT, model),
         )
         Provider.OPENROUTER -> Route(
             "https://openrouter.ai/api/v1/chat/completions",
             secrets.get("openrouter_key"),
             true,
-            model,
+            ModelCatalog.remap(Provider.OPENROUTER, model),
         )
         Provider.ORCA -> Route(
             "https://api.orcarouter.ai/v1/chat/completions",
             secrets.get("orca_key"),
             true,
-            if (model.isBlank() || model.endsWith("/auto") || model.contains("laguna", true)) "orcarouter/free" else model,
+            ModelCatalog.remap(Provider.ORCA, model),
         )
         Provider.CUSTOM -> Route(
             customEndpoint.ifBlank { secrets.get("custom_endpoint").orEmpty() },
@@ -184,7 +247,7 @@ class AiGateway(private val secrets: SecretStore) {
         val auth = if (key.isNullOrBlank()) null else "Bearer $key"
         val connection = (URL(endpoint).openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
-            connectTimeout = 20_000
+            connectTimeout = 16_000
             readTimeout = 180_000
             doOutput = true
             setRequestProperty("Content-Type", "application/json")
@@ -204,32 +267,46 @@ class AiGateway(private val secrets: SecretStore) {
             }
             val text = StringBuilder()
             val think = StringBuilder()
+            var promptTokens = 0
+            var completionTokens = 0
             BufferedReader(InputStreamReader(connection.inputStream, Charsets.UTF_8)).use { reader ->
                 while (true) {
                     if (abort()) break
                     val line = reader.readLine() ?: break
-                    if (!line.startsWith("data:")) continue
-                    val data = line.removePrefix("data:").trim()
+                    val data = when {
+                        line.startsWith("data:") -> line.removePrefix("data:").trim()
+                        line.startsWith("{") -> line.trim()
+                        else -> continue
+                    }
                     if (data.isEmpty() || data == "[DONE]") {
                         if (data == "[DONE]") break
                         continue
                     }
                     val json = runCatching { JSONObject(data) }.getOrNull() ?: continue
+                    json.optJSONObject("usage")?.let { usage ->
+                        promptTokens = usage.optInt("prompt_tokens", promptTokens)
+                        completionTokens = usage.optInt("completion_tokens", completionTokens)
+                    }
                     val choice = json.optJSONArray("choices")?.optJSONObject(0) ?: continue
-                    val delta = choice.optJSONObject("delta") ?: choice.optJSONObject("message") ?: JSONObject()
-                    val piece = delta.optString("content")
-                    val reason = listOf("reasoning", "reasoning_content", "thinking")
-                        .map { delta.optString(it) }
-                        .firstOrNull { it.isNotBlank() }
-                        .orEmpty()
+                    val (piece, reason) = StreamText.deltaOf(choice)
                     if (piece.isNotEmpty()) text.append(piece)
                     if (reason.isNotEmpty()) think.append(reason)
                     if (piece.isNotEmpty() || reason.isNotEmpty()) {
                         onDelta(StreamDelta(piece, reason))
                     }
+                    val finish = StreamText.clean(choice.optString("finish_reason"))
+                    if (finish == "stop" || finish == "end_turn") {
+                        // keep reading until [DONE] so usage can arrive
+                    }
                 }
             }
-            return ChatReply(text = text.toString(), thinking = think.toString(), model = model)
+            return ChatReply(
+                text = StreamText.stripNullSpam(text.toString()),
+                thinking = StreamText.stripNullSpam(think.toString()),
+                model = model,
+                promptTokens = promptTokens,
+                completionTokens = completionTokens,
+            )
         } finally {
             connection.disconnect()
         }
@@ -241,7 +318,7 @@ class AiGateway(private val secrets: SecretStore) {
         abort: () -> Boolean,
         onDelta: (StreamDelta) -> Unit,
     ): ChatReply {
-        val model = if (preferredModel.startsWith("gemini")) preferredModel else "gemini-2.0-flash"
+        val model = if (preferredModel.startsWith("gemini")) preferredModel else "gemini-2.5-flash"
         val key = geminiKeys().firstOrNull() ?: error("Gemini API key is not configured")
         val system = messages.filter { it.role == "system" }.joinToString("\n") { it.content }
         val contents = JSONArray()
@@ -259,7 +336,7 @@ class AiGateway(private val secrets: SecretStore) {
         val url = "https://generativelanguage.googleapis.com/v1beta/models/$model:streamGenerateContent?alt=sse&key=$key"
         val connection = (URL(url).openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
-            connectTimeout = 20_000
+            connectTimeout = 16_000
             readTimeout = 180_000
             doOutput = true
             setRequestProperty("Content-Type", "application/json")
@@ -285,7 +362,7 @@ class AiGateway(private val secrets: SecretStore) {
                         ?.optJSONObject("content")
                         ?.optJSONArray("parts") ?: continue
                     for (i in 0 until parts.length()) {
-                        val piece = parts.getJSONObject(i).optString("text")
+                        val piece = StreamText.jsonText(parts.getJSONObject(i), "text")
                         if (piece.isNotEmpty()) {
                             text.append(piece)
                             onDelta(StreamDelta(text = piece))
@@ -293,7 +370,7 @@ class AiGateway(private val secrets: SecretStore) {
                     }
                 }
             }
-            return ChatReply(text = text.toString(), model = model)
+            return ChatReply(text = StreamText.stripNullSpam(text.toString()), model = model, provider = "gemini")
         } finally {
             connection.disconnect()
         }
@@ -305,6 +382,7 @@ class AiGateway(private val secrets: SecretStore) {
     private fun geminiChat(preferredModel: String, messages: List<ChatTurn>): ChatReply {
         val models = listOf(
             preferredModel.takeIf { it.startsWith("gemini") },
+            "gemini-2.5-flash",
             "gemini-2.0-flash",
             "gemini-2.0-flash-lite",
             "gemini-1.5-flash",
@@ -315,12 +393,9 @@ class AiGateway(private val secrets: SecretStore) {
         for (key in keys) {
             for (m in models) {
                 try {
-                    return geminiOnce(m, key, messages).copy(model = m)
+                    return geminiOnce(m, key, messages).copy(model = m, provider = "gemini")
                 } catch (e: Exception) {
                     last = e
-                    if (!isTransient(e) && "429" !in e.message.orEmpty() && "403" !in e.message.orEmpty()) {
-                        continue
-                    }
                 }
             }
         }
@@ -353,7 +428,7 @@ class AiGateway(private val secrets: SecretStore) {
             .getJSONObject("content")
             .optJSONArray("parts") ?: JSONArray()
         val text = buildString {
-            for (i in 0 until parts.length()) append(parts.getJSONObject(i).optString("text"))
+            for (i in 0 until parts.length()) append(StreamText.jsonText(parts.getJSONObject(i), "text"))
         }.ifBlank { "Empty response" }
         val usage = json.optJSONObject("usageMetadata")
         return ChatReply(
@@ -364,19 +439,9 @@ class AiGateway(private val secrets: SecretStore) {
     }
 
     companion object {
-        val ZEN_FREE = listOf(
-            "laguna-s-2.1-free",
-            "deepseek-v4-flash-free",
-            "mimo-v2.5-free",
-            "nemotron-3-ultra-free",
-            "north-mini-code-free",
-            "deepseek-v4-flash",
-        )
+        val ZEN_FREE = ModelCatalog.zenFreeIds()
 
-        fun isTransient(e: Throwable): Boolean {
-            val m = e.message.orEmpty().lowercase()
-            return listOf("502", "503", "504", "unavailable", "timeout", "upstream").any { it in m }
-        }
+        fun isTransient(e: Throwable): Boolean = StreamText.retryable(e)
     }
 
     fun pingMcp(): AiResult {
@@ -419,20 +484,21 @@ class AiGateway(private val secrets: SecretStore) {
         val json = JSONObject(response)
         if (json.has("error")) {
             val error = json.optJSONObject("error")
-            val message = error?.optString("message").orEmpty().ifBlank {
-                json.optString("error", "Provider error")
+            val message = error?.let { StreamText.jsonText(it, "message") }.orEmpty().ifBlank {
+                StreamText.clean(json.optString("error")).ifBlank { "Provider error" }
             }
             error(message)
         }
-        val text = json.getJSONArray("choices")
-            .getJSONObject(0)
-            .getJSONObject("message")
-            .optString("content", "Empty response")
+        val message = json.getJSONArray("choices").getJSONObject(0).getJSONObject("message")
+        val text = StreamText.jsonText(message, "content").ifBlank { "Empty response" }
+        val thinking = StreamText.jsonText(message, "reasoning", "reasoning_content", "thinking")
         val usage = json.optJSONObject("usage")
         return ChatReply(
-            text = text,
+            text = StreamText.stripNullSpam(text),
+            thinking = StreamText.stripNullSpam(thinking),
             promptTokens = usage?.optInt("prompt_tokens") ?: 0,
             completionTokens = usage?.optInt("completion_tokens") ?: 0,
+            model = model,
         )
     }
 
@@ -461,7 +527,7 @@ class AiGateway(private val secrets: SecretStore) {
     private fun post(endpoint: String, body: String, authorization: String?): String {
         val connection = (URL(endpoint).openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
-            connectTimeout = 20_000
+            connectTimeout = 16_000
             readTimeout = 90_000
             doOutput = true
             setRequestProperty("Content-Type", "application/json")
