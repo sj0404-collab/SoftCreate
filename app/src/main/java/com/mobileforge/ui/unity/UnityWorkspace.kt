@@ -68,7 +68,7 @@ fun UnityWorkspace(vm: AppViewModel) {
             MfButton("＋ Cam") { vm.addObject("Camera") }
             Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 MfButton("Projects") { overlay = if (overlay == Section.Projects) null else Section.Projects }
-                MfButton("AI") { overlay = if (overlay == Section.Ai) null else Section.Ai }
+                MfButton("AI") { vm.go(Section.Agent) }
                 MfButton("Cloud") { overlay = if (overlay == Section.Cloud) null else Section.Cloud }
                 MfButton("MCP") { overlay = if (overlay == Section.Mcp) null else Section.Mcp }
                 MfButton("Assets") { overlay = if (overlay == Section.Assets) null else Section.Assets }

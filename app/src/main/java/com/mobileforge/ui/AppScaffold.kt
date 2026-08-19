@@ -17,6 +17,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.unit.dp
 import com.mobileforge.AppViewModel
+import com.mobileforge.Section
+import com.mobileforge.ui.agent.AgentScreen
 import com.mobileforge.ui.common.MfButton
 import com.mobileforge.ui.common.MfField
 import com.mobileforge.ui.portrait.PortraitStudio
@@ -37,7 +39,11 @@ fun AppRoot(vm: AppViewModel) {
         containerColor = MfBg,
     ) { padding ->
         androidx.compose.foundation.layout.Box(Modifier.padding(padding)) {
-            if (landscape) UnityWorkspace(vm) else PortraitStudio(vm)
+            when {
+                vm.section == Section.Agent -> AgentScreen(vm)
+                landscape -> UnityWorkspace(vm)
+                else -> PortraitStudio(vm)
+            }
         }
     }
     Dialogs(vm)

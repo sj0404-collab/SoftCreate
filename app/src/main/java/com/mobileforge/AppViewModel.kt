@@ -8,8 +8,11 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.mobileforge.agent.AgentCard
+import com.mobileforge.agent.AgentParser
 import com.mobileforge.ai.AiGateway
 import com.mobileforge.ai.AiResult
+import com.mobileforge.ai.ChatTurn
 import com.mobileforge.ai.Provider
 import com.mobileforge.cloud.GhAccount
 import com.mobileforge.cloud.GhRepo
@@ -32,7 +35,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
-enum class Section { Projects, Studio, Assets, Play, Cloud, Mcp, Ai, Settings }
+enum class Section { Agent, Projects, Studio, Assets, Play, Cloud, Mcp, Ai, Settings }
 enum class AiCommand { Create, Change, Delete, Explain }
 
 data class ProjectItem(val name: String, val type: String)
@@ -50,7 +53,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     val github = GitHubService(secrets, prefs)
     private val mcp = McpHub(secrets, prefs, store, scenesStore, github)
 
-    var section by mutableStateOf(Section.Projects)
+    var section by mutableStateOf(Section.Agent)
     var toast by mutableStateOf<String?>(null)
     var projectName by mutableStateOf<String?>(null)
     var projects = mutableStateListOf<ProjectItem>()
@@ -68,7 +71,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     var playHud by mutableStateOf("")
     var playControls by mutableStateOf(ControlLayout.EMPTY)
     var provider by mutableStateOf("zen")
-    var model by mutableStateOf("deepseek-v4-flash")
+    var model by mutableStateOf("laguna-s-2.1-free")
     var customEndpoint by mutableStateOf("")
     var customModel by mutableStateOf("")
     var aiEvent by mutableStateOf("ON_UPDATE")
@@ -156,18 +159,22 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             Section.Settings -> refreshProviderFlags()
             Section.Cloud -> refreshGithub()
             Section.Mcp -> refreshMcp()
-            Section.Ai -> {}
+            Section.Ai, Section.Agent -> {}
         }
     }
 
     fun back(): Boolean {
+        if (agentRunning) {
+            stopAgent()
+            return true
+        }
         if (runtime?.playing == true) {
             stopPlay()
             return true
         }
         return when (section) {
-            Section.Projects -> false
-            else -> { go(Section.Studio); true }
+            Section.Agent -> false
+            else -> { go(Section.Agent); true }
         }
     }
 
@@ -733,6 +740,160 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun plugins() = PluginRegistry.bundled
+
+    fun toggleCard(id: Long) {
+        val i = agentCards.indexOfFirst { it.id == id }
+        if (i >= 0) agentCards[i] = agentCards[i].copy(expanded = !agentCards[i].expanded)
+    }
+
+    fun stopAgent() {
+        agentCancel = true
+        agentRunning = false
+        agentStatus = "стоп"
+        log("Агент остановлен")
+    }
+
+    fun submitAgent() {
+        val task = agentInput.trim()
+        if (task.isBlank() || agentRunning) return
+        agentInput = ""
+        runAgent(task)
+    }
+
+    fun runAgent(task: String) {
+        agentCancel = false
+        agentRunning = true
+        agentStatus = "работа"
+        agentRound = 0
+        agentToolsUsed = 0
+        val started = System.currentTimeMillis()
+        val messages = mutableListOf(
+            ChatTurn("system", AgentParser.SYSTEM.trimIndent()),
+            ChatTurn(
+                "user",
+                buildString {
+                    appendLine(task)
+                    appendLine("Active project: ${projectName ?: "none"}")
+                    if (scene != null) appendLine("Active scene: ${scene?.name} ${scene?.dimension}")
+                },
+            ),
+        )
+        viewModelScope.launch {
+            try {
+                var safety = 0
+                while (!agentCancel && safety < 20) {
+                    safety++
+                    agentRound = safety
+                    agentElapsed = ((System.currentTimeMillis() - started) / 1000).toInt()
+                    val reply = withContext(Dispatchers.IO) {
+                        ai.converse(Provider.fromId(provider), customModel.ifBlank { model }, messages, customEndpoint)
+                    }.getOrElse {
+                        pushCard("ошибка", "error", "{}", it.message ?: "fail", 0, false)
+                        return@launch
+                    }
+                    agentTokens += reply.promptTokens + reply.completionTokens
+                    messages += ChatTurn("assistant", reply.text)
+                    val action = AgentParser.parse(reply.text)
+                    if (action.done && action.tool == null) {
+                        pushCard("готово", "done", "{}", action.say.ifBlank { reply.text }, 0, true)
+                        break
+                    }
+                    val tool = action.tool ?: "say"
+                    val t0 = System.currentTimeMillis()
+                    val result = runCatching { executeAgentTool(tool, action.args) }
+                        .getOrElse { "ERROR: ${it.message}" }
+                    val ms = System.currentTimeMillis() - t0
+                    agentToolsUsed++
+                    pushCard(tool, tool, action.args.toString(), result, ms, !result.startsWith("ERROR"))
+                    if (action.done || tool == "done") {
+                        if (action.say.isNotBlank()) pushCard("итог", "done", "{}", action.say, 0, true)
+                        break
+                    }
+                    messages += ChatTurn("user", "TOOL_RESULT $tool:\n${result.take(4000)}")
+                }
+            } finally {
+                agentRunning = false
+                if (!agentCancel) agentStatus = "готов"
+                agentElapsed = ((System.currentTimeMillis() - started) / 1000).toInt()
+            }
+        }
+    }
+
+    private fun pushCard(title: String, tool: String, args: String, result: String, ms: Long, ok: Boolean) {
+        agentCards.add(
+            0,
+            AgentCard(
+                id = System.nanoTime(),
+                title = title,
+                tool = tool,
+                args = args,
+                result = result,
+                ms = ms,
+                ok = ok,
+            ),
+        )
+        log("$title · ${ms}ms")
+    }
+
+    private fun executeAgentTool(tool: String, args: org.json.JSONObject): String {
+        return when (tool) {
+            "project.create" -> {
+                val name = args.optString("name")
+                val type = args.optString("type", "3d")
+                val created = store.create(name, type).getOrThrow()
+                openProject(created.name, navigate = false)
+                "created ${created.name}"
+            }
+            "project.list" -> store.projects().joinToString { it.name }.ifBlank { "(empty)" }
+            "project.open" -> {
+                openProject(args.optString("name"), navigate = false)
+                "opened $projectName"
+            }
+            "project.seed_demo" -> {
+                val demo = store.seedDemo()
+                openProject(demo.name, navigate = false)
+                "opened ${demo.name}"
+            }
+            "fs.list" -> {
+                val p = current(false) ?: error("no project")
+                store.files(p).joinToString("\n") { it.relativePath }.ifBlank { "(no files)" }
+            }
+            "fs.read" -> {
+                val p = current(false) ?: error("no project")
+                store.resolve(p, args.getString("path")).readText()
+            }
+            "fs.write", "fs.create" -> {
+                val p = current(false) ?: error("no project")
+                store.writeFile(p, args.getString("path"), args.optString("content")).getOrThrow()
+                refreshFiles()
+                "wrote ${args.getString("path")}"
+            }
+            "scene.create" -> {
+                createScene(args.optString("name", "Main"), args.optString("dimension", "3D"))
+                "scene ok"
+            }
+            "scene.list" -> scenes.joinToString { it.name }.ifBlank { "(no scenes)" }
+            "scene.add_object" -> {
+                addObject(args.optString("type", "Mesh"))
+                "added"
+            }
+            "controls.set" -> {
+                val p = current(false) ?: error("no project")
+                val body = if (args.has("items")) {
+                    org.json.JSONObject().put("format", "mobileforge.controls.v1").put("items", args.get("items")).toString(2)
+                } else args.toString(2)
+                store.writeFile(p, "UI/Controls.json", body).getOrThrow()
+                refreshFiles()
+                "controls saved"
+            }
+            "play.start" -> {
+                startPlay()
+                "play"
+            }
+            "say", "done" -> args.optString("say").ifBlank { "ok" }
+            else -> error("unknown tool $tool")
+        }
+    }
 
     private fun refreshProviderFlags() {
         hasZen = secrets.has("zen_key")

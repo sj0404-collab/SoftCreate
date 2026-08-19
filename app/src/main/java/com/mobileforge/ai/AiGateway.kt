@@ -14,36 +14,50 @@ class AiGateway(private val secrets: SecretStore) {
         model: String,
         prompt: String,
         customEndpoint: String = "",
-    ): AiResult {
-        return try {
-            when (provider) {
-                Provider.ZEN_DIRECT -> chat(
-                    endpoint = "https://opencode.ai/zen/v1/chat/completions",
-                    key = secrets.get("zen_key"),
-                    model = model,
-                    prompt = prompt,
-                    title = "Zen",
-                    requireKey = false,
-                )
-                Provider.OPENROUTER -> chat(
-                    endpoint = "https://openrouter.ai/api/v1/chat/completions",
-                    key = secrets.get("openrouter_key"),
-                    model = model,
-                    prompt = prompt,
-                    title = "OpenRouter",
-                )
-                Provider.LOCAL_MCP -> mcp(prompt)
-                Provider.CUSTOM -> {
-                    val endpoint = customEndpoint.ifBlank { secrets.get("custom_endpoint").orEmpty() }
-                    if (!endpoint.startsWith("https://")) {
-                        AiResult.Failure("Custom endpoint must use HTTPS")
-                    } else {
-                        chat(endpoint, secrets.get("custom_key"), model, prompt, "Custom")
-                    }
+    ): AiResult = converse(
+        provider,
+        model,
+        listOf(ChatTurn("user", prompt)),
+        customEndpoint,
+    ).fold(
+        { AiResult.Success(it.text) },
+        { AiResult.Failure(it.message ?: "AI error") },
+    )
+
+    fun converse(
+        provider: Provider,
+        model: String,
+        messages: List<ChatTurn>,
+        customEndpoint: String = "",
+    ): Result<ChatReply> = runCatching {
+        when (provider) {
+            Provider.ZEN_DIRECT -> chat(
+                endpoint = "https://opencode.ai/zen/v1/chat/completions",
+                key = secrets.get("zen_key"),
+                model = model,
+                messages = messages,
+                title = "Zen",
+                requireKey = false,
+            )
+            Provider.OPENROUTER -> chat(
+                endpoint = "https://openrouter.ai/api/v1/chat/completions",
+                key = secrets.get("openrouter_key"),
+                model = model,
+                messages = messages,
+                title = "OpenRouter",
+            )
+            Provider.LOCAL_MCP -> {
+                val joined = messages.lastOrNull { it.role == "user" }?.content.orEmpty()
+                when (val r = mcp(joined)) {
+                    is AiResult.Success -> ChatReply(r.text)
+                    is AiResult.Failure -> error(r.message)
                 }
             }
-        } catch (e: Exception) {
-            AiResult.Failure(e.message ?: "Network error")
+            Provider.CUSTOM -> {
+                val endpoint = customEndpoint.ifBlank { secrets.get("custom_endpoint").orEmpty() }
+                require(endpoint.startsWith("https://")) { "Custom endpoint must use HTTPS" }
+                chat(endpoint, secrets.get("custom_key"), model, messages, "Custom")
+            }
         }
     }
 
@@ -66,21 +80,20 @@ class AiGateway(private val secrets: SecretStore) {
         endpoint: String,
         key: String?,
         model: String,
-        prompt: String,
+        messages: List<ChatTurn>,
         title: String,
         requireKey: Boolean = true,
-    ): AiResult {
+    ): ChatReply {
         if (requireKey && key.isNullOrBlank()) {
-            return AiResult.Failure("$title API key is not configured")
+            error("$title API key is not configured")
+        }
+        val arr = JSONArray()
+        messages.forEach { turn ->
+            arr.put(JSONObject().put("role", turn.role).put("content", turn.content))
         }
         val body = JSONObject()
             .put("model", model)
-            .put(
-                "messages",
-                JSONArray().put(
-                    JSONObject().put("role", "user").put("content", prompt),
-                ),
-            )
+            .put("messages", arr)
             .put("stream", false)
             .toString()
         val auth = if (key.isNullOrBlank()) null else "Bearer $key"
@@ -91,13 +104,18 @@ class AiGateway(private val secrets: SecretStore) {
             val message = error?.optString("message").orEmpty().ifBlank {
                 json.optString("error", "Provider error")
             }
-            return AiResult.Failure(message)
+            error(message)
         }
         val text = json.getJSONArray("choices")
             .getJSONObject(0)
             .getJSONObject("message")
             .optString("content", "Empty response")
-        return AiResult.Success(text)
+        val usage = json.optJSONObject("usage")
+        return ChatReply(
+            text = text,
+            promptTokens = usage?.optInt("prompt_tokens") ?: 0,
+            completionTokens = usage?.optInt("completion_tokens") ?: 0,
+        )
     }
 
     private fun mcp(prompt: String): AiResult {
