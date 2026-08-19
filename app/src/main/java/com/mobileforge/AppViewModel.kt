@@ -186,7 +186,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun openProject(name: String) {
+    fun openProject(name: String, navigate: Boolean = true) {
         projectName = name
         dirty = false
         openPath = null
@@ -197,12 +197,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         selected = scene?.objects?.firstOrNull()?.name
         log("Проект открыт: $name")
         notify("Проект: $name")
-        go(Section.Studio)
+        if (navigate) go(Section.Studio)
     }
 
-    fun createProject(raw: String, type: String) {
+    fun createProject(raw: String, type: String, navigate: Boolean = true) {
         store.create(raw, type).fold(
-            { openProject(it.name) },
+            { openProject(it.name, navigate) },
             { notify(it.message ?: "Ошибка создания") },
         )
     }
