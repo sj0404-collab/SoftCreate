@@ -70,7 +70,8 @@ class AiGateway(private val secrets: SecretStore) {
         }
         var last: Exception? = null
         for (candidate in queue) {
-            repeat(2) { attempt ->
+            var nextModel = false
+            for (attempt in 0 until 2) {
                 try {
                     return chat(
                         endpoint = "https://opencode.ai/zen/v1/chat/completions",
@@ -82,13 +83,15 @@ class AiGateway(private val secrets: SecretStore) {
                     ).copy(model = candidate, provider = "zen")
                 } catch (e: Exception) {
                     last = e
+                    if (StreamText.hostDead(e)) throw e
                     if (!StreamText.retryable(e)) {
-                        if (StreamText.hostDead(e)) throw e
+                        nextModel = true
                         break
                     }
                     Thread.sleep(500L * (attempt + 1))
                 }
             }
+            if (nextModel) continue
         }
         throw last ?: IllegalStateException("Zen недоступен")
     }
