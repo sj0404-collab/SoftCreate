@@ -199,7 +199,7 @@ private fun ModelChip(vm: AppViewModel) {
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
             listOf(
                 "zen" to listOf("laguna-s-2.1-free", "deepseek-v4-flash-free", "mimo-v2.5-free", "nemotron-3-ultra-free"),
-                "orca" to listOf("orcarouter/auto"),
+                "orca" to listOf("orcarouter/free", "deepseek/deepseek-v4-flash-free", "tencent/hy3-free"),
                 "gemini" to listOf("gemini-2.0-flash", "gemini-2.0-flash-lite"),
             ).forEach { (prov, ids) ->
                 ids.forEach { id ->
@@ -268,7 +268,8 @@ private fun prettyModel(id: String): String = when {
     id.contains("mimo") -> "MiMo V2.5"
     id.contains("nemotron") -> "Nemotron 3"
     id.contains("north") -> "North Mini"
-    id.contains("orcarouter") || id == "auto" -> "Orca Auto"
+    id.contains("orcarouter/free") || id == "auto" -> "Orca Free"
+    id.contains("orcarouter") -> "Orca"
     id.contains("gemini-2.0-flash-lite") -> "Gemini Flash Lite"
     id.contains("gemini-2.0") -> "Gemini 2.0 Flash"
     id.contains("gemini") -> "Gemini"

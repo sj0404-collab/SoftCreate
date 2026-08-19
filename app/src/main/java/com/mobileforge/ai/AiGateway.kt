@@ -49,8 +49,8 @@ class AiGateway(private val secrets: SecretStore) {
             Provider.ORCA -> chat(
                 endpoint = "https://api.orcarouter.ai/v1/chat/completions",
                 key = secrets.get("orca_key"),
-                model = if (model.isBlank() || model.contains("laguna", true) || model.contains("free")) {
-                    "orcarouter/auto"
+                model = if (model.isBlank() || model.contains("laguna", true) || model == "auto" || model.endsWith("/auto")) {
+                    "orcarouter/free"
                 } else model,
                 messages = messages,
                 title = "Orca",

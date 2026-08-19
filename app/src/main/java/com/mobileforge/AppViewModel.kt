@@ -138,7 +138,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             val preset = when (provider) {
                 "zen" -> listOf("laguna-s-2.1-free", "deepseek-v4-flash-free", "mimo-v2.5-free", "nemotron-3-ultra-free", "north-mini-code-free", "deepseek-v4-flash")
                 "openrouter" -> listOf("openrouter/free", "google/gemma-3-27b-it:free", "meta-llama/llama-3.3-70b-instruct:free", "qwen/qwen3-30b-a3b:free")
-                "orca" -> listOf("orcarouter/auto", "auto")
+                "orca" -> listOf("orcarouter/free", "deepseek/deepseek-v4-flash-free", "tencent/hy3-free", "deepseek/deepseek-v4-pro-free")
                 "gemini" -> listOf("gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-1.5-flash")
                 "mcp" -> listOf("Termux local agent model")
                 else -> emptyList()
