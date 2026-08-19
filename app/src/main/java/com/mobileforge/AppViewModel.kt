@@ -112,6 +112,20 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     var mcpNewName by mutableStateOf("")
     var mcpNewUrl by mutableStateOf("https://")
     var mcpNewToken by mutableStateOf("")
+    var agentInput by mutableStateOf("")
+    var agentRunning by mutableStateOf(false)
+    var agentStatus by mutableStateOf("готов")
+    var agentRound by mutableStateOf(0)
+    var agentToolsUsed by mutableStateOf(0)
+    var agentTokens by mutableStateOf(0)
+    var agentElapsed by mutableStateOf(0)
+    var agentMenu by mutableStateOf(false)
+    val agentCards = mutableStateListOf<AgentCard>()
+    private var agentCancel = false
+    private val sessionStarted = System.currentTimeMillis()
+    val sessionLimitMs = 6L * 60 * 60 * 1000
+    fun sessionElapsedMs(): Long = System.currentTimeMillis() - sessionStarted
+    fun sessionLeftMs(): Long = (sessionLimitMs - sessionElapsedMs()).coerceAtLeast(0)
 
     val models: List<String>
         get() {
