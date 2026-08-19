@@ -1173,12 +1173,3 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         """.trimIndent()
     }
 }
-Event
-            Project: ${projectName ?: "none"}
-            $sceneCtx
-            $fileCtx
-            ORDER FROM DIRECTOR:
-            $aiTask
-        """.trimIndent()
-    }
-}
