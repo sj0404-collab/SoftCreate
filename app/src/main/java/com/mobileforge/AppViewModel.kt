@@ -38,7 +38,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
-enum class Section { Agent, Projects, Studio, Assets, Play, Cloud, Mcp, Ai, Settings }
+enum class Section { Agent, Projects, Files, Studio, Assets, Play, Cloud, Mcp, Ai, Settings }
 enum class AiCommand { Create, Change, Delete, Explain }
 
 data class ProjectItem(val name: String, val type: String)
@@ -141,6 +141,19 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     val models: List<String>
         get() = (ModelCatalog.idsFor(provider) + listOfNotNull(customModel.ifBlank { null })).distinct()
 
+    fun projectsRoot(): String = store.root.absolutePath
+
+    fun projectPath(): String =
+        projectName?.let { store.find(it)?.directory?.absolutePath } ?: store.root.absolutePath
+
+    fun copyProjectPath() {
+        val path = projectPath()
+        val cm = getApplication<Application>()
+            .getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+        cm.setPrimaryClip(android.content.ClipData.newPlainText("project", path))
+        notify("Путь: $path")
+    }
+
     fun setRoute(nextProvider: String, nextModel: String) {
         provider = nextProvider
         model = nextModel
@@ -161,7 +174,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         provider = prefs.getString("ai_provider", "zen").orEmpty().ifBlank { "zen" }
         model = prefs.getString("${provider}_model", ModelCatalog.defaultId(provider))
             .orEmpty().ifBlank { ModelCatalog.defaultId(provider) }
-        log("MobileForge 2.4 — телефон = превью/редактор, сборка = GitHub runner")
+        log("MobileForge 2.5 — сцена/код/файлы отдельно, путь проекта на диске")
     }
 
     fun notify(text: String) {
@@ -178,7 +191,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         section = next
         when (next) {
             Section.Projects -> refreshProjects()
-            Section.Studio, Section.Assets -> {
+            Section.Files, Section.Studio, Section.Assets, Section.Ai -> {
                 refreshFiles()
                 refreshScenes()
                 refreshPack()
@@ -187,7 +200,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             Section.Settings -> refreshProviderFlags()
             Section.Cloud -> refreshGithub()
             Section.Mcp -> refreshMcp()
-            Section.Ai, Section.Agent -> {}
+            Section.Agent -> {}
         }
     }
 
@@ -388,11 +401,21 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         scenesStore.create(project, name, dim).fold(
             {
                 scene = it
-                selected = it.objects.firstOrNull()?.name
+                selected = it.objects.firstOrNull { obj -> obj.type != "Camera" }?.name
+                    ?: it.objects.firstOrNull()?.name
                 refreshScenes()
                 notify("Сцена ${it.name}")
             },
-            { notify(it.message ?: "Ошибка сцены") },
+            { err ->
+                val msg = err.message.orEmpty()
+                if ("already exists" in msg) {
+                    refreshScenes()
+                    scene = scenes.firstOrNull { it.name.equals(name, true) } ?: scene
+                    notify("Сцена $name уже есть — открыл")
+                } else {
+                    notify(msg.ifBlank { "Ошибка сцены" })
+                }
+            },
         )
     }
 
@@ -950,6 +973,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 openProject(args.optString("name"), navigate = false)
                 "opened $projectName"
             }
+            "project.path" -> projectPath()
             "project.seed_demo" -> {
                 val demo = store.seedDemo()
                 openProject(demo.name, navigate = false)

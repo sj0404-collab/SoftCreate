@@ -9,7 +9,7 @@ class ProjectStore(context: Context) {
     data class Project(val name: String, val directory: File)
     data class SourceFile(val relativePath: String, val file: File)
 
-    val root: File = File(context.filesDir, "projects").apply { mkdirs() }
+    val root: File = resolveRoot(context)
 
     private val allowed = setOf(
         "cs", "cpp", "c", "h", "hpp", "json", "xml", "glsl", "vert", "frag",
@@ -246,6 +246,19 @@ class ProjectStore(context: Context) {
     }
 
     companion object {
+        fun resolveRoot(context: Context): File {
+            val externalBase = context.getExternalFilesDir(null) ?: context.filesDir
+            val external = File(externalBase, "projects").apply { mkdirs() }
+            val internal = File(context.filesDir, "projects")
+            if (internal.exists()) {
+                internal.listFiles()?.forEach { src ->
+                    val dest = File(external, src.name)
+                    if (!dest.exists()) runCatching { src.copyRecursively(dest) }
+                }
+            }
+            return external
+        }
+
         fun sanitizeName(raw: String): String =
             raw.trim().replace(Regex("[^A-Za-z0-9_-]"), "_").take(48)
 

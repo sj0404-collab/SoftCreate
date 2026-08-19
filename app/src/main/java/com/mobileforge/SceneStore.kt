@@ -22,12 +22,16 @@ class SceneStore {
             require(dim == "2D" || dim == "3D") { "Invalid scene type." }
             val file = File(project.directory, "Scenes/$name.scene.json")
             require(!file.exists()) { "Scene already exists." }
-            val camera = if (dim == "3D") {
-                SceneObject("MainCamera", "Camera", 0f, 5f, 10f, rx = -18f, color = "#9aa4b2", solid = false)
+            val objects = mutableListOf<SceneObject>()
+            if (dim == "3D") {
+                objects += SceneObject("MainCamera", "Camera", 0f, 5f, 10f, rx = -18f, color = "#9aa4b2", solid = false)
+                objects += SceneObject("Light", "Light", 3f, 8f, 2f, color = "#fff4cc", solid = false)
+                objects += SceneObject("Ground", "Ground", 0f, 0f, 0f, sx = 16f, sy = 1f, sz = 16f, color = "#2a3144")
             } else {
-                SceneObject("MainCamera", "Camera", 0f, 0f, 10f, color = "#9aa4b2", solid = false)
+                objects += SceneObject("MainCamera", "Camera", 0f, 0f, 10f, color = "#9aa4b2", solid = false)
+                objects += SceneObject("Ground", "Ground", 0f, -4f, 0f, sx = 24f, sy = 1f, sz = 1f, color = "#2a3144")
             }
-            val scene = GameScene(name, dim, mutableListOf(camera), file)
+            val scene = GameScene(name, dim, objects, file)
             save(scene)
             scene
         }

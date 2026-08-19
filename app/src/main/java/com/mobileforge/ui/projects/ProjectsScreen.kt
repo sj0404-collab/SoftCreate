@@ -29,8 +29,9 @@ fun ProjectsScreen(vm: AppViewModel) {
     Column(Modifier.fillMaxSize().padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         MfHero(
             "Ваши проекты",
-            "Нативный IDE: сцены, исходники, Play и AI. Всё пишется на диск устройства.",
+            "Папка на телефоне:\n${vm.projectsRoot()}\nФайловый менеджер → Android/data/com.mobileforge/files/projects",
         )
+        MfButton("Копировать путь") { vm.copyProjectPath() }
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             MfButton("＋ Новый проект", onClick = { vm.dialog = "create" }, primary = true)
             MfButton("▣ SkyRunner demo", onClick = { vm.seedDemo() })

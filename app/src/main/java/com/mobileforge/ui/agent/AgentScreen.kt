@@ -61,7 +61,9 @@ import com.mobileforge.ui.mcp.McpScreen
 import com.mobileforge.ui.play.PlayScreen
 import com.mobileforge.ui.projects.ProjectsScreen
 import com.mobileforge.ui.settings.SettingsScreen
-import com.mobileforge.ui.studio.StudioScreen
+import com.mobileforge.ui.studio.CodeScreen
+import com.mobileforge.ui.studio.FilesScreen
+import com.mobileforge.ui.studio.SceneScreen
 import com.mobileforge.ui.unity.UnityWorkspace
 import kotlinx.coroutines.delay
 
@@ -81,12 +83,13 @@ private val Think = Color(0xFF9AA0B5)
 private val tabs = listOf(
     Section.Agent to ("✦" to "Агент"),
     Section.Projects to ("▣" to "Проекты"),
-    Section.Studio to ("⌘" to "Редактор"),
+    Section.Files to ("▤" to "Файлы"),
+    Section.Studio to ("⌘" to "Сцена"),
+    Section.Ai to ("✎" to "Код"),
     Section.Assets to ("◇" to "Ассеты"),
     Section.Play to ("▶" to "Play"),
     Section.Cloud to ("☁" to "Cloud"),
     Section.Mcp to ("⚒" to "MCP"),
-    Section.Ai to ("✎" to "Код"),
     Section.Settings to ("⚙" to "Ещё"),
 )
 
@@ -100,7 +103,6 @@ fun AgentScreen(vm: AppViewModel) {
         }
     }
     val session = formatMin(vm.sessionElapsedMs() + tick * 0L)
-    val left = formatMin(vm.sessionLeftMs())
     val limit = formatMin(vm.sessionLimitMs)
     Column(Modifier.fillMaxSize().background(Bg)) {
         Column(Modifier.fillMaxWidth().background(Bar).padding(start = 12.dp, end = 12.dp, top = 10.dp, bottom = 6.dp)) {
@@ -125,17 +127,25 @@ fun AgentScreen(vm: AppViewModel) {
                 Meta("токены", vm.agentTokens.toString())
                 Text(" ${vm.agentElapsed}с", color = Mute, fontSize = 12.sp)
             }
-            Text("сессия $session / $limit · осталось $left · ${BuildConfig.VERSION_NAME}", color = Mute, fontSize = 11.sp)
+            Text(
+                buildString {
+                    append("сессия $session / $limit · ${BuildConfig.VERSION_NAME}")
+                    vm.projectName?.let { append(" · $it") }
+                },
+                color = Mute,
+                fontSize = 11.sp,
+            )
         }
-        TabStrip(vm)
         Box(Modifier.weight(1f).fillMaxWidth()) {
             when (vm.section) {
                 Section.Agent -> ChatPane(vm)
                 Section.Projects -> ProjectsScreen(vm)
-                Section.Studio, Section.Ai -> {
+                Section.Files -> FilesScreen(vm)
+                Section.Studio -> {
                     val land = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
-                    if (land) UnityWorkspace(vm) else StudioScreen(vm)
+                    if (land) UnityWorkspace(vm) else SceneScreen(vm)
                 }
+                Section.Ai -> CodeScreen(vm)
                 Section.Assets -> AssetsScreen(vm)
                 Section.Play -> PlayScreen(vm)
                 Section.Cloud -> CloudScreen(vm)

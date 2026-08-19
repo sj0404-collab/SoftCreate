@@ -49,6 +49,15 @@ object SceneRenderer {
         }
         if (dim == "2D") draw2d(scope, scene, camX, camY, selected, measurer)
         else draw3d(scope, scene, camX, camY, camZ, camRx, camRy, selected, measurer)
+        val visible = scene.objects.any { it.type != "Camera" && it.type != "Light" && it.enabled }
+        if (!visible && measurer != null) {
+            scope.drawText(
+                measurer,
+                "сцена пуста — вкладка Сцена: ＋ Ground / Player",
+                Offset(16f, h - 48f),
+                TextStyle(color = Color.White.copy(alpha = 0.75f), fontSize = 13.sp),
+            )
+        }
     }
 
     private fun draw2d(
@@ -117,10 +126,17 @@ object SceneRenderer {
         val w = scope.size.width
         val h = scope.size.height
         for (gz in -20..20 step 2) {
-            val a = project( -16f, 0f, gz.toFloat(), camX, camY, camZ, camRx, camRy, w, h)
+            val a = project(-16f, 0f, gz.toFloat(), camX, camY, camZ, camRx, camRy, w, h)
             val b = project(16f, 0f, gz.toFloat(), camX, camY, camZ, camRx, camRy, w, h)
             if (a != null && b != null) {
-                scope.drawLine(Color.White.copy(alpha = 0.07f), a.offset, b.offset)
+                scope.drawLine(Color.White.copy(alpha = 0.16f), a.offset, b.offset, strokeWidth = 2f)
+            }
+        }
+        for (gx in -16..16 step 2) {
+            val a = project(gx.toFloat(), 0f, -20f, camX, camY, camZ, camRx, camRy, w, h)
+            val b = project(gx.toFloat(), 0f, 20f, camX, camY, camZ, camRx, camRy, w, h)
+            if (a != null && b != null) {
+                scope.drawLine(Color.White.copy(alpha = 0.10f), a.offset, b.offset, strokeWidth = 1.5f)
             }
         }
         val faces = mutableListOf<Face>()
@@ -135,6 +151,17 @@ object SceneRenderer {
             }
             scope.drawPath(path, face.color)
             scope.drawPath(path, if (face.selected) Color.White else Color.Black.copy(alpha = 0.35f), style = Stroke(if (face.selected) 3f else 1f))
+        }
+        scene.objects.filter { it.type != "Camera" && it.type != "Light" && it.enabled }.forEach { obj ->
+            val tip = project(obj.x, obj.y + kotlin.math.abs(obj.sy) * 0.6f, obj.z, camX, camY, camZ, camRx, camRy, w, h)
+            if (tip != null && measurer != null) {
+                scope.drawText(
+                    measurer,
+                    obj.name,
+                    Offset(tip.offset.x - 20f, tip.offset.y - 16f),
+                    TextStyle(color = Color.White.copy(alpha = 0.85f), fontSize = 11.sp),
+                )
+            }
         }
     }
 
@@ -180,25 +207,8 @@ object SceneRenderer {
         rxDeg: Float, ryDeg: Float,
         w: Float, h: Float,
     ): Proj? {
-        val yaw = Math.toRadians(ryDeg.toDouble())
-        val pitch = Math.toRadians(rxDeg.toDouble())
-        var dx = (x - cx).toDouble()
-        var dy = (y - cy).toDouble()
-        var dz = (z - cz).toDouble()
-        val cosY = kotlin.math.cos(yaw)
-        val sinY = kotlin.math.sin(yaw)
-        val rx = dx * cosY + dz * sinY
-        var rz = -dx * sinY + dz * cosY
-        val cosP = kotlin.math.cos(pitch)
-        val sinP = kotlin.math.sin(pitch)
-        val ry = dy * cosP - rz * sinP
-        rz = dy * sinP + rz * cosP
-        if (rz < 0.4) return null
-        val fov = 420.0
-        return Proj(
-            Offset((w / 2f + rx * fov / rz).toFloat(), (h / 2f - ry * fov / rz).toFloat()),
-            rz.toFloat(),
-        )
+        val p = Projection.project(x, y, z, cx, cy, cz, rxDeg, ryDeg, w, h) ?: return null
+        return Proj(Offset(p.x, p.y), p.depth)
     }
 
     fun parseColor(hex: String): Color {
