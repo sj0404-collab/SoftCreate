@@ -209,7 +209,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             openProject(lastProj, navigate = false)
         }
         installCrashGuard()
-        log("MobileForge 2.9 — чат/проект на диске, Play без вылета, ассеты, плагины")
+        log("MobileForge 2.9.1 — лента листается во время печати")
     }
 
 
@@ -1289,6 +1289,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     if (Director.wantsWorld(order)) {
                         appendLine("Это заказ на мир/игру. Пустая сцена (камера+свет) = провал. Собери видимый мир.")
                     }
+                    if (Director.wants2D(order)) {
+                        appendLine("Это 2D. project.create type=2d, scene.create dimension=2D. Не 3D. Имя не «любую».")
+                    }
+                    appendLine("Имя проекта не предлог и не «любую/для/игра». Если не назвали — выдумай нормальное имя.")
                     appendLine("Уникальные ассеты через asset.create, сразу scene.add_object с material=путь.mat и mesh. Иначе файл есть, а сцена его не видит.")
                     appendLine("Звуки — asset.create kind=sound в Assets/Audio. Потом sound.play или api.playSound.")
                     if (pluginRecords.isEmpty()) {
@@ -1513,7 +1517,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     if (!projectName.isNullOrBlank() && projectName.equals(name, true)) {
                         "уже открыт $projectName"
                     } else {
-                        val type = args.optString("type", "3d")
+                        val type = if (Director.wants2D(lastDirectorTask)) "2d" else args.optString("type", "3d")
                         val created = store.create(name, type).getOrThrow()
                         openProject(created.name, navigate = false)
                         "created ${created.name}"

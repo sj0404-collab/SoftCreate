@@ -27,7 +27,7 @@ class ProjectStore(context: Context) {
     fun find(name: String): Project? = projects().firstOrNull { it.name == sanitizeName(name) }
 
     fun create(name: String, type: String = "3d"): Result<Project> = runCatching {
-        val safe = sanitizeName(name)
+        val safe = sanitizeName(name).ifBlank { "Game_${(name.hashCode().toUInt().toString(16)).take(4)}" }
         require(safe.isNotBlank()) { "Enter a project name." }
         val dir = File(root, safe)
         require(!dir.exists()) { "A project with this name already exists." }
@@ -270,12 +270,21 @@ class ProjectStore(context: Context) {
             return external
         }
 
-        fun sanitizeName(raw: String): String =
-            raw.trim()
-                .replace(Regex("[^\\p{L}\\p{N}_-]+"), "_")
-                .replace(Regex("_+"), "_")
-                .trim('_', '-')
-                .take(48)
+        fun sanitizeName(raw: String): String {
+            val sb = StringBuilder()
+            var gap = false
+            for (ch in raw.trim()) {
+                val ok = ch.isLetterOrDigit() || ch == '_' || ch == '-'
+                if (ok) {
+                    sb.append(ch)
+                    gap = false
+                } else if (!gap) {
+                    sb.append('_')
+                    gap = true
+                }
+            }
+            return sb.toString().trim('_', '-').take(48)
+        }
 
         private fun starterJs(name: String, is3d: Boolean): String = """
             // $name player — runs in MobileForge Play mode

@@ -11,13 +11,16 @@ object Director {
         "эта", "the", "with", "from", "and", "or", "for", "onto", "into", "onto", "a", "an",
         "please", "make", "create", "назван", "называется", "called", "named",
         "ассетов", "ассеты", "ассет", "assets", "asset", "качеств", "качестве", "хорошем",
-        "pollination",
+        "pollination", "любую", "любой", "любое", "любая", "какую", "какой", "какое",
+        "какая", "просто", "плагин", "плагины", "плагинов", "2d", "3d", "two", "three",
+        "её", "ее", "ней", "неё",
     )
 
     private val inventStop = bannedDefaults + nameStop + setOf(
         "придумай", "придумать", "создай", "создать", "сделай", "сделать",
         "пожалуйста", "просто", "очень", "надо", "нужно", "хочу", "пусть",
         "будет", "должна", "должен", "можно", "там", "тут", "ещё", "еще",
+        "любую", "любой", "плагины", "плагин", "неё", "нее",
     )
 
     private val controlHints = listOf(
@@ -98,6 +101,15 @@ object Director {
     fun wantsWorld(task: String): Boolean {
         val low = task.lowercase()
         return worldHints.any { it in low }
+    }
+
+    fun wants2D(task: String): Boolean {
+        val low = task.lowercase().replace(" ", "")
+        if (Regex("(?<![a-zа-я0-9])3d(?![a-zа-я0-9])").containsMatchIn(task.lowercase())) {
+            if (!task.lowercase().contains("2d") && "двумер" !in task.lowercase()) return false
+        }
+        val src = task.lowercase()
+        return "2d" in src || "2-d" in src || "двумер" in src || "платформер" in src
     }
 
     fun isFollowUp(task: String): Boolean {

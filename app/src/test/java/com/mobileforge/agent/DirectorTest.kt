@@ -53,6 +53,14 @@ class DirectorTest {
     }
 
     @Test
+    fun doesNotExtractAnyGame() {
+        assertNull(Director.extractProjectName("создай 2d игру любую и плагины для неё"))
+        val name = Director.resolveName("создай 2d игру любую и плагины для неё", "любую")
+        assertFalse(name.equals("любую", true))
+        assertTrue(Director.wants2D("создай 2d игру любую"))
+    }
+
+    @Test
     fun formatMs() {
         assertEquals("0мс", Director.formatMs(0))
         assertEquals("12мс", Director.formatMs(12))
