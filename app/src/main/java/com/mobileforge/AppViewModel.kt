@@ -1438,13 +1438,13 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                                     "модель",
                                     "fallback",
                                     "{}",
-                                    StreamText.humanError(err) + " → " + ModelCatalog.pretty(nxt.second) + ". Продолжаю заказ.",
+                                    StreamText.humanError(err ?: Exception("ошибка модели")) + " → " + ModelCatalog.pretty(nxt.second) + ". Продолжаю заказ.",
                                     0,
                                     true,
                                 )
                                 continue
                             }
-                            pushCard("ошибка", "error", "{}", StreamText.humanError(err), 0, false)
+                            pushCard("ошибка", "error", "{}", StreamText.humanError(err ?: Exception("ошибка модели")), 0, false)
                             break
                         }
                     }
