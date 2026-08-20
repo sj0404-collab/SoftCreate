@@ -21,6 +21,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -287,10 +288,13 @@ private fun AssistantBubble(ev: AgentEvent.Assistant, onCopy: () -> Unit, onRese
             Text("размышление", color = Think, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp))
             Text(think, color = Think, fontSize = 13.sp, lineHeight = 18.sp)
             Spacer(Modifier.height(8.dp))
+        } else if (ev.live) {
+            Text("размышляет…", color = Think, fontSize = 13.sp, modifier = Modifier.padding(top = 4.dp))
         }
         if (body.isNotBlank()) {
+            Text("делаю", color = Teal, fontSize = 11.sp)
             Text(body, color = Ink, fontSize = 15.sp, lineHeight = 22.sp)
-        } else if (ev.live) {
+        } else if (ev.live && think.isBlank()) {
             Text("печатает…", color = Mute, fontSize = 13.sp)
         }
         Row(
@@ -322,21 +326,31 @@ private fun ToolCard(ev: AgentEvent.Tool, onToggle: () -> Unit, onCopy: () -> Un
             Text(Director.formatMs(ev.ms), color = Teal, fontSize = 12.sp)
         }
         Text(
-            "инструмент · ${Director.formatMs(ev.ms)}",
+            if (ev.expanded) "инструмент · нажми чтобы свернуть" else "инструмент свёрнут · нажми чтобы открыть",
             color = Mute,
             fontSize = 11.sp,
             modifier = Modifier.padding(top = 2.dp),
         )
         if (ev.expanded) {
             Spacer(Modifier.height(8.dp))
-            Text(ev.args, color = Mute, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
-            Spacer(Modifier.height(6.dp))
-            Text(ev.result.take(2000), color = Ink, fontSize = 13.sp, fontFamily = FontFamily.Monospace)
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 280.dp)
+                    .verticalScroll(rememberScrollState()),
+            ) {
+                Text(ev.args, color = Mute, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
+                Spacer(Modifier.height(6.dp))
+                Text(ev.result.take(8000), color = Ink, fontSize = 13.sp, fontFamily = FontFamily.Monospace)
+            }
+            Row(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TinyAction("свернуть", onToggle)
+                TinyAction("копировать", onCopy)
+            }
         } else {
-            Text(ev.result.take(90).replace("\n", " "), color = Mute, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
-        }
-        Row(Modifier.padding(top = 6.dp)) {
-            TinyAction("копировать", onCopy)
+            Row(Modifier.padding(top = 6.dp)) {
+                TinyAction("копировать", onCopy)
+            }
         }
     }
 }

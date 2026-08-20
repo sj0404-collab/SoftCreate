@@ -27,4 +27,15 @@ class AgentParserTest {
         )
         assertEquals("fs.list", action.tool)
     }
+
+    @Test
+    fun displayKeepsThinkingAndSayWithoutDumpingJson() {
+        val view = AgentParser.display(
+            "сначала мысль\n{\"tool\":\"asset.create\",\"say\":\"пишу лес\",\"args\":{}}",
+            "думаю про биомы",
+        )
+        assertTrue(view.thinking.contains("биомы") || view.thinking.contains("мысль"))
+        assertEquals("пишу лес", view.say)
+        assertTrue(view.json.contains("asset.create"))
+    }
 }

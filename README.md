@@ -1,4 +1,4 @@
-# MobileForge 2.8
+# MobileForge 2.9
 
 Вертикально — AI и код. Горизонтально — панели Unity (Hierarchy / Scene / Inspector / Project / Console) с живыми данными.
 

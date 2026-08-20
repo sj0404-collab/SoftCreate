@@ -75,18 +75,23 @@ data class SceneObject(
             "Coin", "Enemy", "Empty", "Button", "Block", "Prefab",
         )
 
+        private fun num(json: JSONObject, key: String, def: Double): Float {
+            val v = json.optDouble(key, def)
+            return if (v.isFinite()) v.toFloat() else def.toFloat()
+        }
+
         fun fromJson(json: JSONObject): SceneObject = SceneObject(
-            name = json.optString("name", "Object"),
-            type = json.optString("type", "Empty"),
-            x = json.optDouble("x").toFloat(),
-            y = json.optDouble("y").toFloat(),
-            z = json.optDouble("z").toFloat(),
-            rx = json.optDouble("rx").toFloat(),
-            ry = json.optDouble("ry").toFloat(),
-            rz = json.optDouble("rz").toFloat(),
-            sx = json.optDouble("sx", 1.0).toFloat(),
-            sy = json.optDouble("sy", 1.0).toFloat(),
-            sz = json.optDouble("sz", 1.0).toFloat(),
+            name = json.optString("name", "Object").let { if (it == "null") "Object" else it },
+            type = json.optString("type", "Empty").let { if (it == "null") "Empty" else it },
+            x = num(json, "x", 0.0),
+            y = num(json, "y", 0.0),
+            z = num(json, "z", 0.0),
+            rx = num(json, "rx", 0.0),
+            ry = num(json, "ry", 0.0),
+            rz = num(json, "rz", 0.0),
+            sx = num(json, "sx", 1.0),
+            sy = num(json, "sy", 1.0),
+            sz = num(json, "sz", 1.0),
             asset = json.optString("asset"),
             script = json.optString("script"),
             color = json.optString("color", "#b69cff"),

@@ -31,6 +31,14 @@ object SceneRenderer {
             Brush.verticalGradient(listOf(Color(0xFF15202B), Color(0xFF0B0D14))),
         )
         if (scene == null) return
+        scene.objects.forEach { obj ->
+            if (!obj.x.isFinite()) obj.x = 0f
+            if (!obj.y.isFinite()) obj.y = 0f
+            if (!obj.z.isFinite()) obj.z = 0f
+            if (!obj.sx.isFinite() || obj.sx == 0f) obj.sx = 1f
+            if (!obj.sy.isFinite() || obj.sy == 0f) obj.sy = 1f
+            if (!obj.sz.isFinite() || obj.sz == 0f) obj.sz = 1f
+        }
         val dim = scene.dimension.uppercase()
         val camObj = scene.objects.firstOrNull { it.type == "Camera" }
         var camX = camObj?.x ?: 0f

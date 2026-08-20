@@ -41,6 +41,7 @@ class GameRuntime(
     source: GameScene,
     scripts: Map<String, String>,
     private val onLoadScene: ((String) -> Unit)? = null,
+    private val onSound: ((String) -> Unit)? = null,
 ) {
     var dimension: String = source.dimension
     val actors = source.objects.map { Actor(it) }.toMutableList()
@@ -115,6 +116,9 @@ class GameRuntime(
         if (actor.type != "Player" && actor.type != "Enemy") return
         val g = if (dimension.equals("2D", true)) 18f else 16f
         actor.vy -= g * dt
+        if (!actor.x.isFinite()) actor.x = 0f
+        if (!actor.y.isFinite()) actor.y = 1f
+        if (!actor.z.isFinite()) actor.z = 0f
         actor.y += actor.vy * dt
         val gy = groundY(actor)
         if (actor.y < gy) {
@@ -260,6 +264,10 @@ class GameRuntime(
                     }
                     "log" -> ScriptInterpreter.Val.Host { args ->
                         log(args.getOrNull(0)?.str().orEmpty())
+                        ScriptInterpreter.Val.Null
+                    }
+                    "playSound", "sound" -> ScriptInterpreter.Val.Host { args ->
+                        onSound?.invoke(args.getOrNull(0)?.str().orEmpty())
                         ScriptInterpreter.Val.Null
                     }
                     "loadScene" -> ScriptInterpreter.Val.Host { args ->

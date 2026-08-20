@@ -27,6 +27,7 @@ import com.mobileforge.engine.Completions
 import com.mobileforge.engine.ControlLayout
 import com.mobileforge.engine.CsTranspiler
 import com.mobileforge.engine.GameRuntime
+import com.mobileforge.engine.SoundBank
 import com.mobileforge.engine.Orbit
 import com.mobileforge.engine.Suggestion
 import com.mobileforge.export.HtmlPreview
@@ -42,7 +43,9 @@ import com.mobileforge.security.SecretStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
 import org.json.JSONObject
+import java.io.File
 
 enum class Section { Agent, Projects, Files, Studio, Assets, Play, Cloud, Mcp, Ai, Settings, Changes, Plugins }
 enum class AiCommand { Create, Change, Delete, Explain }
@@ -185,6 +188,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             .apply()
     }
 
+    private var soundBank: SoundBank? = null
+
     init {
         refreshProjects()
         refreshProviderFlags()
@@ -197,7 +202,80 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         model = prefs.getString("${provider}_model", ModelCatalog.defaultId(provider))
             .orEmpty().ifBlank { ModelCatalog.defaultId(provider) }
         lastSubstantialTask = prefs.getString("last_order", "").orEmpty()
-        log("MobileForge 2.8 — память чата, русский, копировать/переслать, время, общий ключ")
+        soundBank = SoundBank(getApplication())
+        restoreFeed()
+        val lastProj = prefs.getString("last_project", "").orEmpty()
+        if (lastProj.isNotBlank() && store.find(lastProj) != null) {
+            openProject(lastProj, navigate = false)
+        }
+        installCrashGuard()
+        log("MobileForge 2.9 — чат/проект на диске, Play без вылета, ассеты, плагины")
+    }
+
+
+    private fun feedFile(): File = File(getApplication<Application>().filesDir, "agent_feed.json")
+
+    private fun persistFeed() {
+        runCatching {
+            val arr = JSONArray()
+            agentFeed.takeLast(150).forEach { ev ->
+                val o = JSONObject()
+                when (ev) {
+                    is AgentEvent.User -> o.put("k", "u").put("id", ev.id).put("t", ev.text)
+                    is AgentEvent.Assistant -> o.put("k", "a").put("id", ev.id)
+                        .put("t", ev.text.take(4000)).put("th", ev.thinking.take(12000)).put("ms", ev.ms)
+                    is AgentEvent.Tool -> o.put("k", "o").put("id", ev.id).put("title", ev.title)
+                        .put("tool", ev.tool).put("args", ev.args.take(4000)).put("result", ev.result.take(4000))
+                        .put("ms", ev.ms).put("ok", ev.ok)
+                }
+                arr.put(o)
+            }
+            feedFile().writeText(arr.toString())
+        }
+    }
+
+    private fun restoreFeed() {
+        val f = feedFile()
+        if (!f.isFile) return
+        runCatching {
+            val arr = JSONArray(f.readText())
+            for (i in 0 until arr.length()) {
+                val o = arr.optJSONObject(i) ?: continue
+                val id = o.optLong("id", System.nanoTime() + i)
+                when (o.optString("k")) {
+                    "u" -> agentFeed += AgentEvent.User(id, o.optString("t"))
+                    "a" -> agentFeed += AgentEvent.Assistant(
+                        id = id,
+                        text = o.optString("t"),
+                        thinking = o.optString("th"),
+                        live = false,
+                        ms = o.optLong("ms"),
+                    )
+                    "o" -> agentFeed += AgentEvent.Tool(
+                        id = id,
+                        title = o.optString("title"),
+                        tool = o.optString("tool"),
+                        args = o.optString("args"),
+                        result = o.optString("result"),
+                        ms = o.optLong("ms"),
+                        ok = o.optBoolean("ok", true),
+                        expanded = false,
+                    )
+                }
+            }
+        }
+    }
+
+    private fun installCrashGuard() {
+        val prev = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { thread, err ->
+            runCatching {
+                persistFeed()
+                File(getApplication<Application>().filesDir, "crash.txt")
+                    .writeText("${err.javaClass.name}: ${err.message}\n${err.stackTraceToString().take(4000)}")
+            }
+            prev?.uncaughtException(thread, err)
+        }
     }
 
     fun notify(text: String) {
@@ -266,6 +344,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         reloadPlugins()
         reloadChanges()
         firePlugin("onOpen")
+        prefs.edit().putString("last_project", name).apply()
         log("Проект открыт: $name")
         notify("Проект: $name")
         if (navigate) go(Section.Studio)
@@ -527,10 +606,21 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
         val mesh = args.optString("mesh").ifBlank { SceneObject.defaultMesh(type) }
-        val material = args.optString("material")
+        var material = args.optString("material")
+        if (material == "null") material = ""
+        if (material.isBlank()) {
+            current(false)?.let { p ->
+                val guess = listOf(
+                    "Assets/Materials/$name.mat",
+                    "Assets/Materials/${name}Mat.mat",
+                    "Materials/$name.mat",
+                )
+                material = guess.firstOrNull { store.resolve(p, it).isFile }.orEmpty()
+            }
+        }
         val extra = org.json.JSONObject()
-        args.optString("pattern").takeIf { it.isNotBlank() }?.let { extra.put("pattern", it) }
-        args.optString("accent").takeIf { it.isNotBlank() }?.let { extra.put("accent", it) }
+        args.optString("pattern").takeIf { it.isNotBlank() && it != "null" }?.let { extra.put("pattern", it) }
+        args.optString("accent").takeIf { it.isNotBlank() && it != "null" }?.let { extra.put("accent", it) }
         if (material.isNotBlank()) {
             current(false)?.let { p ->
                 runCatching {
@@ -577,6 +667,16 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun startPlay() {
+        runCatching { startPlayUnsafe() }.onFailure { err ->
+            runCatching { runtime?.stop() }
+            runtime = null
+            val msg = err.message ?: err.javaClass.simpleName
+            log("Play crash: $msg")
+            notify("Play не запустился: $msg")
+        }
+    }
+
+    private fun startPlayUnsafe() {
         val project = current() ?: return
         if (scene == null) refreshScenes()
         val currentScene = scene ?: scenes.firstOrNull() ?: return notify("Нет сцены")
@@ -591,13 +691,25 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             if (file.isFile) ControlLayout.parse(file.readText()) else ControlLayout.EMPTY
         }.getOrDefault(ControlLayout.EMPTY)
         runtime?.stop()
-        runtime = GameRuntime(currentScene, scripts).also { it.start() }
-        firePlugin("onPlay")
+        val bank = soundBank ?: SoundBank(getApplication()).also { soundBank = it }
+        val wavs = runCatching { bank.loadFrom(project.directory) }.getOrDefault(emptyList())
+        runtime = GameRuntime(
+            currentScene,
+            scripts,
+            onSound = { name -> runCatching { bank.play(name) } },
+        ).also { it.start() }
+        runCatching { firePlugin("onPlay") }
         log(
-            if (playControls.items.isEmpty()) {
-                "Play: сенсор не задан (AI может создать UI/Controls.json)"
-            } else {
-                "Play: ${playControls.items.size} виджет(ов) управления из проекта"
+            buildString {
+                append(
+                    if (playControls.items.isEmpty()) {
+                        "Play: сенсор не задан"
+                    } else {
+                        "Play: ${playControls.items.size} виджет(ов)"
+                    },
+                )
+                if (wavs.isEmpty()) append(" · wav нет (Assets/Audio)")
+                else append(" · звуки ${wavs.joinToString()}")
             },
         )
     }
@@ -897,9 +1009,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun createPlugin() = createPluginFromArgs(pluginNewId, pluginNewTitle)
 
-    fun createPluginFromArgs(id: String, title: String): String {
+    fun createPluginFromArgs(id: String, title: String, code: String = ""): String {
         val p = current(false) ?: return "ERROR: no project"
-        val rec = pluginHost.create(p, id.ifBlank { "plugin" }, title.ifBlank { id })
+        val rec = pluginHost.create(p, id.ifBlank { "plugin" }, title.ifBlank { id }, code)
         reloadPlugins()
         refreshFiles()
         firePlugin("onInstall")
@@ -927,7 +1039,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun firePlugin(hook: String, extraPath: String = "", extraType: String = "") {
         val p = current(false) ?: return
         pluginRecords.filter { it.enabled && hook in it.hooks }.forEach { rec ->
-            val out = pluginHost.run(rec, hook, pluginEnv(extraPath, extraType))
+            val out = runCatching { pluginHost.run(rec, hook, pluginEnv(extraPath, extraType)) }
+                .getOrElse { "ERROR: ${it.message}" }
             if (out.isNotBlank() && out != "null") pluginLog.add(0, "${rec.id}.$hook → $out")
         }
         while (pluginLog.size > 40) pluginLog.removeAt(pluginLog.lastIndex)
@@ -1078,6 +1191,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         if (task.isBlank() || agentRunning) return
         agentFeed += AgentEvent.User(System.nanoTime(), task)
         streamTick++
+        persistFeed()
         runAgent(task)
     }
 
@@ -1087,6 +1201,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         agentInput = ""
         agentFeed += AgentEvent.User(System.nanoTime(), task)
         streamTick++
+        persistFeed()
         runAgent(task)
     }
 
@@ -1174,7 +1289,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     if (Director.wantsWorld(order)) {
                         appendLine("Это заказ на мир/игру. Пустая сцена (камера+свет) = провал. Собери видимый мир.")
                     }
-                    appendLine("Уникальные ассеты через asset.create. Люди = Capsule, земля = Plane, без фиолетовых Cube.")
+                    appendLine("Уникальные ассеты через asset.create, сразу scene.add_object с material=путь.mat и mesh. Иначе файл есть, а сцена его не видит.")
+                    appendLine("Звуки — asset.create kind=sound в Assets/Audio. Потом sound.play или api.playSound.")
+                    if (pluginRecords.isEmpty()) {
+                        appendLine("Плагинов нет. Для механик заказа вызови plugin.create с code (JS onPlay/onAddObject). Без плагина задумка не сдана.")
+                    }
                 },
             ),
         )
@@ -1205,14 +1324,18 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                                 if (idx >= 0) {
                                     val cur = agentFeed[idx] as? AgentEvent.Assistant ?: return@post
                                     if (delta.reset) {
-                                        agentFeed[idx] = cur.copy(text = "", thinking = "", live = true)
+                                        agentFeed[idx] = cur.copy(text = "", raw = "", live = true)
                                     } else {
                                         val piece = StreamText.clean(delta.text)
                                         val reason = StreamText.clean(delta.thinking)
                                         if (piece.isEmpty() && reason.isEmpty()) return@post
+                                        val rawAcc = StreamText.stripNullSpam(cur.raw + piece)
+                                        val thinkAcc = StreamText.stripNullSpam(cur.thinking + reason)
+                                        val view = AgentParser.display(rawAcc, thinkAcc)
                                         agentFeed[idx] = cur.copy(
-                                            text = StreamText.stripNullSpam(cur.text + piece),
-                                            thinking = StreamText.stripNullSpam(cur.thinking + reason),
+                                            text = view.say,
+                                            thinking = view.thinking.ifBlank { thinkAcc },
+                                            raw = rawAcc,
                                             live = true,
                                         )
                                     }
@@ -1236,24 +1359,31 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     val llmMs = System.currentTimeMillis() - llmStarted
                     agentLastLlmMs = llmMs
                     agentTokens += reply.promptTokens + reply.completionTokens
-                    val raw = StreamText.stripNullSpam(reply.text.ifBlank { reply.thinking })
+                    val liveRaw = withContext(Dispatchers.Main) {
+                        (agentFeed.firstOrNull { it.id == liveId } as? AgentEvent.Assistant)?.raw.orEmpty()
+                    }
+                    val raw = StreamText.stripNullSpam(reply.text.ifBlank { liveRaw.ifBlank { reply.thinking } })
                     messages += ChatTurn("assistant", raw)
                     val action = AgentParser.parse(raw)
+                    val view = AgentParser.display(raw, reply.thinking)
                     withContext(Dispatchers.Main) {
                         val idx = agentFeed.indexOfFirst { it.id == liveId }
                         if (idx >= 0) {
                             val cur = agentFeed[idx] as? AgentEvent.Assistant
                             if (cur != null) {
-                                val think = StreamText.stripNullSpam(cur.thinking.ifBlank { reply.thinking })
-                                val shown = when {
-                                    action.tool != null -> action.say
-                                    action.done && action.say.isNotBlank() -> action.say
-                                    else -> StreamText.stripNullSpam(cur.text.ifBlank { reply.text })
-                                }
-                                agentFeed[idx] = cur.copy(text = shown, thinking = think, live = false, ms = llmMs)
+                                val think = view.thinking.ifBlank { cur.thinking }.ifBlank { StreamText.stripNullSpam(reply.thinking) }
+                                val shown = action.say.ifBlank { view.say }
+                                agentFeed[idx] = cur.copy(
+                                    text = shown,
+                                    thinking = think,
+                                    raw = raw,
+                                    live = false,
+                                    ms = llmMs,
+                                )
                                 streamTick++
                             }
                         }
+                        persistFeed()
                     }
                     if (action.done && action.tool == null) {
                         pushCard("готово", "done", "{}", action.say.ifBlank { reply.text }, llmMs, true)
@@ -1277,6 +1407,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 agentRunning = false
                 if (!agentCancel) agentStatus = "готов"
                 agentElapsed = ((System.currentTimeMillis() - started) / 1000).toInt()
+                persistFeed()
             }
         }
     }
@@ -1295,9 +1426,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 ok = ok,
             ),
         )
-        agentFeed += AgentEvent.Tool(id, title, tool, args, result, ms, ok)
+        agentFeed += AgentEvent.Tool(id, title, tool, args, result, ms, ok, expanded = false)
         streamTick++
-        log("$title · ${ms}ms")
+        persistFeed()
+        log("$title · ${Director.formatMs(ms)}")
     }
 
     private fun createAsset(args: org.json.JSONObject): String {
@@ -1339,8 +1471,35 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 written += meshPath
             }
         }
+        written.forEach { path ->
+            val before = ""
+            val after = runCatching { store.resolve(p, path).takeIf { it.isFile }?.readText() }.getOrNull().orEmpty()
+            recordWrite(path, "агент", before, after.take(2000))
+        }
+        applyAssetsToScene(p, name, written)
         refreshFiles()
-        return "created ${written.joinToString()}"
+        return "created ${written.joinToString()} — повесь material/mesh на объекты, иначе не видно"
+    }
+
+    private fun applyAssetsToScene(p: ProjectStore.Project, name: String, written: List<String>) {
+        val currentScene = scene ?: return
+        val mat = written.firstOrNull { it.endsWith(".mat") }
+        val changed = currentScene.objects.filter { it.name.equals(name, true) || it.material.isBlank() && it.name.contains(name, true) }
+        if (mat != null) {
+            val text = runCatching { store.resolve(p, mat).readText() }.getOrNull().orEmpty()
+            val (c, pat, acc) = AssetKitchen.parseMat(text)
+            val targets = currentScene.objects.filter { it.name.equals(name, true) }
+            targets.forEach { obj ->
+                obj.material = mat
+                if (c.isNotBlank()) obj.color = c
+                obj.extra.put("pattern", pat)
+                obj.extra.put("accent", acc)
+                obj.extra.put("material", mat)
+            }
+        }
+        if (changed.isNotEmpty() || (mat != null && currentScene.objects.any { it.name.equals(name, true) })) {
+            persistScene(false)
+        }
     }
 
     private fun executeAgentTool(tool: String, args: org.json.JSONObject): String {
@@ -1416,7 +1575,16 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 "play"
             }
             "plugin.create" -> {
-                createPluginFromArgs(args.optString("id"), args.optString("title"))
+                createPluginFromArgs(
+                    args.optString("id"),
+                    args.optString("title"),
+                    args.optString("code").let { if (it == "null") "" else it },
+                )
+            }
+            "sound.play", "audio.play" -> {
+                val n = args.optString("name").ifBlank { args.optString("file") }
+                val ok = soundBank?.play(n) == true
+                if (ok) "played $n" else "нет звука $n (положи wav в Assets/Audio)"
             }
             "plugin.list" -> pluginRecords.joinToString { it.id + (if (it.enabled) "" else " (off)") }.ifBlank { "(no plugins)" }
             "plugin.run" -> runPluginMenu(args.optString("id"), args.optString("menu"))

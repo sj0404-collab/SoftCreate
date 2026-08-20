@@ -11,6 +11,7 @@ sealed class AgentEvent {
         val thinking: String = "",
         val live: Boolean = false,
         val ms: Long = 0,
+        val raw: String = "",
     ) : AgentEvent()
     data class Tool(
         override val id: Long,
@@ -60,6 +61,31 @@ object AgentParser {
         return AgentAction(tool, args, done, say)
     }
 
+    data class View(val thinking: String, val say: String, val json: String)
+
+    fun display(raw: String, streamedThinking: String = ""): View {
+        var s = raw.replace(Regex("(?:null){2,}"), "")
+        val think = StringBuilder()
+        if (streamedThinking.isNotBlank()) {
+            think.appendLine(streamedThinking.replace(Regex("(?:null){2,}"), "").trim())
+        }
+        val tag = Regex("(?is)<(?:think|thinking|reason|reasoning)>(.*?)</(?:think|thinking|reason|reasoning)>")
+        tag.findAll(s).forEach { think.appendLine(it.groupValues[1].trim()) }
+        s = tag.replace(s, " ")
+        val startIdx = s.indexOf('{')
+        val prose = if (startIdx < 0) s.trim() else s.take(startIdx).trim()
+        if (prose.isNotBlank() && !prose.startsWith("```") && !prose.startsWith("{")) {
+            think.appendLine(prose)
+        }
+        val json = if (startIdx >= 0) s.substring(startIdx) else ""
+        val sayMatch = Regex("\"say\"\\s*:\\s*\"(.*?)\"", RegexOption.DOT_MATCHES_ALL).find(json)
+        var say = sayMatch?.groupValues?.get(1).orEmpty()
+        val quote = say.indexOf('"')
+        if (quote >= 0) say = say.take(quote)
+        say = say.replace("\\n", "\n").replace("\\\"", "\"")
+        return View(think.toString().trim(), say, json)
+    }
+
     fun extractJson(raw: String): JSONObject? {
         val trimmed = raw.trim()
         val fence = Regex("```(?:json)?\\s*([\\s\\S]*?)```").find(trimmed)
@@ -97,7 +123,7 @@ object AgentParser {
 - asset.create {"kind":"sound","name":"Шаг","freq":220}
 - controls.set {"items":[...]}   ТОЛЬКО если режиссёр просил тач/джойстик/кнопки
 - play.start {}
-- plugin.create {"id":"scorepad","title":"Score Pad"}
+- plugin.create {"id":"rpgworld","title":"RPG World","code":"function onPlay(api){ api.log(\"play\"); }"}
 - plugin.list {}
 - plugin.run {"id":"scorepad","menu":"ping"}
 
@@ -118,5 +144,9 @@ object AgentParser {
 - scene.list перед тем как плодить дубликаты. Не копируй Player/Ground без нужды.
 - project.seed_demo только если просили демо SkyRunner.
 - Не заканчивай done, пока заказ не выполнен. Пустая сцена после «сделай РПГ» — провал.
+- После asset.create сразу вешай material/mesh на объекты: scene.add_object с material="Assets/Materials/Имя.mat" и mesh="Capsule|Plane|pyramid". Иначе ассет не виден.
+- Звуки только asset.create kind=sound. Потом api.playSound("Имя") в скрипте.
+- Для механик игры ОБЯЗАТЕЛЬНО plugin.create с рабочим JS в code (onPlay/onAddObject). Без плагина задумка не считается сделанной.
+- В каждом вызове инструмента поле say — сначала по-русски ЧТО делаешь, потом инструмент. Не пиши JSON человеку.
 """
 }

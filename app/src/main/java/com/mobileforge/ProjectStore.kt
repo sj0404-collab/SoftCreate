@@ -271,7 +271,11 @@ class ProjectStore(context: Context) {
         }
 
         fun sanitizeName(raw: String): String =
-            raw.trim().replace(Regex("[^A-Za-z0-9_-]"), "_").take(48)
+            raw.trim()
+                .replace(Regex("[^\\p{L}\\p{N}_-]+"), "_")
+                .replace(Regex("_+"), "_")
+                .trim('_', '-')
+                .take(48)
 
         private fun starterJs(name: String, is3d: Boolean): String = """
             // $name player — runs in MobileForge Play mode

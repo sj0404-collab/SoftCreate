@@ -52,7 +52,7 @@ class PluginHost {
         return loaded.toList()
     }
 
-    fun create(project: ProjectStore.Project, rawId: String, title: String): PluginRecord {
+    fun create(project: ProjectStore.Project, rawId: String, title: String, code: String = ""): PluginRecord {
         val id = ProjectStore.sanitizeName(rawId).ifBlank { "plugin" }.lowercase()
         val dir = File(project.directory, "Plugins/$id").apply { mkdirs() }
         val manifest = JSONObject()
@@ -64,21 +64,14 @@ class PluginHost {
             .put("hooks", JSONArray().put("onInstall").put("onSave").put("onPlay").put("onAddObject"))
             .put("menus", JSONArray().put(JSONObject().put("id", "ping").put("label", "Ping")))
         File(dir, "plugin.json").writeText(manifest.toString(2) + "\n")
-        File(dir, "main.js").writeText(
-            """
-            function onInstall(api) {
-              api.log("$id installed");
-              api.writeFile("Logs/$id.txt", "installed " + api.time);
+        val body = if (code.isNotBlank()) {
+            runCatching { ScriptInterpreter(code) }.onFailure {
+                File(dir, "main.js").writeText(fallbackJs(id))
+                error("plugin JS: ${it.message}")
             }
-            function onSave(api) { api.log("$id onSave " + api.path); }
-            function onPlay(api) { api.log("$id onPlay"); }
-            function onAddObject(api) { api.log("$id add " + api.type + " " + api.name); }
-            function menu_ping(api) {
-              api.writeFile("Logs/$id-ping.txt", "ping " + api.time);
-              api.notify("$id ping → Logs/$id-ping.txt");
-            }
-            """.trimIndent() + "\n",
-        )
+            code.trim() + "\n"
+        } else fallbackJs(id)
+        File(dir, "main.js").writeText(body)
         return reload(project).first { it.id == id }
     }
 
@@ -95,8 +88,24 @@ class PluginHost {
         if (!plugin.enabled) return "disabled"
         val src = File(plugin.directory, plugin.entry)
         if (!src.isFile) return "no ${plugin.entry}"
-        val script = ScriptInterpreter(src.readText())
+        val script = runCatching { ScriptInterpreter(src.readText()) }.getOrElse { return "ERROR parse ${plugin.id}: ${it.message}" }
         if (!script.has(fn)) return "no function $fn"
         return runCatching { script.call(fn, env).str() }.getOrElse { "ERROR: ${it.message}" }
+    }
+
+    companion object {
+        fun fallbackJs(id: String): String = """
+            function onInstall(api) {
+              api.log("$id installed");
+              api.writeFile("Logs/$id.txt", "installed " + api.time);
+            }
+            function onSave(api) { api.log("$id onSave " + api.path); }
+            function onPlay(api) { api.log("$id onPlay"); }
+            function onAddObject(api) { api.log("$id add " + api.type + " " + api.name); }
+            function menu_ping(api) {
+              api.writeFile("Logs/$id-ping.txt", "ping " + api.time);
+              api.notify("$id ping → Logs/$id-ping.txt");
+            }
+        """.trimIndent() + "\n"
     }
 }

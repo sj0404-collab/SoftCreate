@@ -74,7 +74,7 @@ fun PlayScreen(vm: AppViewModel, modifier: Modifier = Modifier) {
             (if (Key.S in keys || Key.DirectionDown in keys) 1f else 0f)
         if (Key.Spacebar in keys) rt.input.jump = true
     }
-    LaunchedEffect(runtime) { focus.requestFocus() }
+    LaunchedEffect(runtime) { runCatching { focus.requestFocus() } }
     Box(
         modifier
             .fillMaxSize()
