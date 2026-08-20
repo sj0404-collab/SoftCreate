@@ -77,6 +77,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     var suggestions = mutableStateListOf<Suggestion>()
     var scenes = mutableStateListOf<GameScene>()
     var scene by mutableStateOf<GameScene?>(null)
+    var sceneEpoch by mutableStateOf(0)
     var selected by mutableStateOf<String?>(null)
     val orbit = Orbit()
     var runtime by mutableStateOf<GameRuntime?>(null)
@@ -208,7 +209,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             openProject(lastProj, navigate = false)
         }
         installCrashGuard()
-        log("MobileForge 2.9.3 — UI не блокируется на стриме")
+        log("MobileForge 2.10 — вкладки без вылета, автосмена модели")
     }
 
 
@@ -293,6 +294,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         if (next != Section.Play) runtime?.stop()
         section = next
         viewModelScope.launch(Dispatchers.IO) {
+            runCatching {
             when (next) {
                 Section.Projects -> withContext(Dispatchers.Main) { refreshProjects() }
                 Section.Files, Section.Studio -> withContext(Dispatchers.Main) {
@@ -320,6 +322,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 Section.Mcp -> withContext(Dispatchers.Main) { refreshMcp() }
                 else -> {}
             }
+            }.onFailure { log("вкладка: ${it.message}") }
         }
     }
 
@@ -535,10 +538,13 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun refreshScenes() {
-        val project = current(false) ?: return
-        scenes.clear()
-        scenes += scenesStore.scenes(project)
-        if (scene == null) scene = scenes.firstOrNull()
+        runCatching {
+            val project = current(false) ?: return
+            val loaded = scenesStore.scenes(project)
+            scenes.clear()
+            scenes += loaded
+            if (scene == null) scene = scenes.firstOrNull()
+        }.onFailure { log("сцены: ${it.message}") }
     }
 
     fun createScene(name: String, dim: String) {
@@ -576,18 +582,20 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun persistScene(show: Boolean = false) {
-        current(false) ?: return
-        val currentScene = scene ?: return
-        val scenePath = "Scenes/${currentScene.name}.scene.json"
-        val sceneBefore = runCatching { currentScene.file.takeIf { it.isFile }?.readText() }.getOrNull().orEmpty()
-        scenesStore.save(currentScene)
-        recordWrite(scenePath, "сцена", sceneBefore, currentScene.toJson().toString(2) + "\n")
-        if (openPath == "Scenes/${currentScene.name}.scene.json") {
-            editorText = currentScene.toJson().toString(2) + "\n"
-            dirty = false
-        }
-        if (show) notify("Сцена сохранена")
-        refreshScenes()
+        runCatching {
+            current(false) ?: return
+            val currentScene = scene ?: return
+            val scenePath = "Scenes/${currentScene.name}.scene.json"
+            val sceneBefore = runCatching { currentScene.file.takeIf { it.isFile }?.readText() }.getOrNull().orEmpty()
+            scenesStore.save(currentScene)
+            recordWrite(scenePath, "сцена", sceneBefore, currentScene.toJson().toString(2) + "\n")
+            if (openPath == "Scenes/${currentScene.name}.scene.json") {
+                editorText = currentScene.toJson().toString(2) + "\n"
+                dirty = false
+            }
+            sceneEpoch++
+            if (show) notify("Сцена сохранена")
+        }.onFailure { log("сцена: ${it.message}") }
     }
 
     fun selectObject(name: String) {
@@ -1378,7 +1386,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                             )
                         }
                     }
-                    val reply = withContext(Dispatchers.IO) {
+                    val streamed = withContext(Dispatchers.IO) {
                         ai.converseStream(
                             Provider.fromId(provider),
                             customModel.ifBlank { model },
@@ -1400,10 +1408,47 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                             }
                             paintLive(false)
                         }
-                    }.getOrElse {
-                        pushCard("ошибка", "error", "{}", StreamText.humanError(it), 0, false)
-                        return@launch
                     }
+                    var replyResult = streamed
+                    if (replyResult.isFailure) {
+                        val err = replyResult.exceptionOrNull()
+                        replyResult = withContext(Dispatchers.IO) {
+                            ai.converseResilient(
+                                Provider.fromId(provider),
+                                customModel.ifBlank { model },
+                                messages,
+                                customEndpoint,
+                            )
+                        }
+                        if (replyResult.isSuccess) {
+                            pushCard("модель", "fallback", "{}", "стрим упал — продолжаю без стрима", 0, true)
+                        } else {
+                            val nxt = ModelCatalog.plan(Provider.fromId(provider), "auto") { pid ->
+                                when (pid) {
+                                    Provider.ZEN_DIRECT -> true
+                                    Provider.OPENROUTER -> hasOr
+                                    Provider.ORCA -> hasOrca
+                                    Provider.GEMINI -> hasGemini
+                                    else -> false
+                                }
+                            }.firstOrNull { it.second != model }
+                            if (nxt != null) {
+                                setRoute(ModelCatalog.idOf(nxt.first), nxt.second)
+                                pushCard(
+                                    "модель",
+                                    "fallback",
+                                    "{}",
+                                    StreamText.humanError(err) + " → " + ModelCatalog.pretty(nxt.second) + ". Продолжаю заказ.",
+                                    0,
+                                    true,
+                                )
+                                continue
+                            }
+                            pushCard("ошибка", "error", "{}", StreamText.humanError(err), 0, false)
+                            break
+                        }
+                    }
+                    val reply = replyResult.getOrThrow()
                     if (reply.provider.isNotBlank() || (reply.model.isNotBlank() && reply.model != model)) {
                         val nextProv = reply.provider.ifBlank { provider }.let {
                             if (it == "zen_direct" || it == "zendirect") "zen" else it

@@ -3,6 +3,7 @@ package com.mobileforge
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import java.util.concurrent.CopyOnWriteArrayList
 
 class SceneStore {
     fun scenes(project: ProjectStore.Project): List<GameScene> {
@@ -22,7 +23,7 @@ class SceneStore {
             require(dim == "2D" || dim == "3D") { "Invalid scene type." }
             val file = File(project.directory, "Scenes/$name.scene.json")
             require(!file.exists()) { "Scene already exists." }
-            val objects = mutableListOf<SceneObject>()
+            val objects = CopyOnWriteArrayList<SceneObject>()
             if (dim == "3D") {
                 objects += SceneObject("MainCamera", "Camera", 0f, 5f, 10f, rx = -18f, color = "#9aa4b2", solid = false)
                 objects += SceneObject("Light", "Light", 3f, 8f, 2f, color = "#fff4cc", solid = false)
@@ -43,7 +44,7 @@ class SceneStore {
         val name = ProjectStore.sanitizeName(json.optString("name"))
         require(name.isNotBlank()) { "Scene name is required." }
         val file = File(project.directory, "Scenes/$name.scene.json")
-        val objects = mutableListOf<SceneObject>()
+        val objects = CopyOnWriteArrayList<SceneObject>()
         val items = json.optJSONArray("objects") ?: JSONArray()
         for (i in 0 until items.length()) {
             objects.add(SceneObject.fromJson(items.getJSONObject(i)))
@@ -51,7 +52,7 @@ class SceneStore {
         val scene = GameScene(
             name = name,
             dimension = json.optString("dimension", "3D"),
-            objects = objects,
+            objects = CopyOnWriteArrayList(objects),
             file = file,
         )
         save(scene)
@@ -60,7 +61,7 @@ class SceneStore {
 
     fun load(file: File): GameScene? = try {
         val data = JSONObject(file.readText())
-        val objects = mutableListOf<SceneObject>()
+        val objects = CopyOnWriteArrayList<SceneObject>()
         val values = data.optJSONArray("objects") ?: JSONArray()
         for (i in 0 until values.length()) {
             objects.add(SceneObject.fromJson(values.getJSONObject(i)))
@@ -68,7 +69,7 @@ class SceneStore {
         GameScene(
             name = data.optString("name", file.name.removeSuffix(".scene.json")),
             dimension = data.optString("dimension", "2D"),
-            objects = objects,
+            objects = CopyOnWriteArrayList(objects),
             file = file,
         )
     } catch (_: Exception) {

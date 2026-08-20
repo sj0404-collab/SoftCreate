@@ -31,23 +31,32 @@ object SceneRenderer {
             Brush.verticalGradient(listOf(Color(0xFF15202B), Color(0xFF0B0D14))),
         )
         if (scene == null) return
-        scene.objects.forEach { obj ->
-            if (!obj.x.isFinite()) obj.x = 0f
-            if (!obj.y.isFinite()) obj.y = 0f
-            if (!obj.z.isFinite()) obj.z = 0f
-            if (!obj.sx.isFinite() || obj.sx == 0f) obj.sx = 1f
-            if (!obj.sy.isFinite() || obj.sy == 0f) obj.sy = 1f
-            if (!obj.sz.isFinite() || obj.sz == 0f) obj.sz = 1f
+        try {
+            drawUnsafe(scope, scene, selected, orbit, follow, measurer, w, h)
+        } catch (_: Throwable) {
+            return
         }
+    }
+
+    private fun drawUnsafe(
+        scope: DrawScope,
+        scene: GameScene,
+        selected: String?,
+        orbit: Orbit,
+        follow: Boolean,
+        measurer: TextMeasurer?,
+        w: Float,
+        h: Float,
+    ) {
         val dim = scene.dimension.uppercase()
-        val camObj = scene.objects.firstOrNull { it.type == "Camera" }
+        val camObj = snapObjects(scene).firstOrNull { it.type == "Camera" }
         var camX = camObj?.x ?: 0f
         var camY = camObj?.y ?: 5f
         var camZ = camObj?.z ?: 12f
         var camRx = (camObj?.rx ?: -18f) + orbit.pitch
         var camRy = (camObj?.ry ?: 0f) + orbit.yaw
         if (follow) {
-            scene.objects.firstOrNull { it.type == "Player" }?.let { p ->
+            snapObjects(scene).firstOrNull { it.type == "Player" }?.let { p ->
                 if (dim == "3D") {
                     camX = p.x; camY = p.y + 5f; camZ = p.z + 11f; camRx = -22f
                 } else {
@@ -57,7 +66,7 @@ object SceneRenderer {
         }
         if (dim == "2D") draw2d(scope, scene, camX, camY, selected, measurer)
         else draw3d(scope, scene, camX, camY, camZ, camRx, camRy, selected, measurer)
-        val visible = scene.objects.any { it.type != "Camera" && it.type != "Light" && it.enabled }
+        val visible = snapObjects(scene).any { it.type != "Camera" && it.type != "Light" && it.enabled }
         if (!visible && measurer != null) {
             scope.drawText(
                 measurer,
@@ -67,6 +76,12 @@ object SceneRenderer {
             )
         }
     }
+
+    private fun snapObjects(scene: GameScene): List<SceneObject> =
+        runCatching { scene.objects.toList() }.getOrDefault(emptyList())
+
+    private fun extraStr(obj: SceneObject, key: String, def: String): String =
+        runCatching { obj.extra.optString(key, def).ifBlank { def } }.getOrDefault(def)
 
     private fun draw2d(
         scope: DrawScope,
@@ -83,7 +98,7 @@ object SceneRenderer {
             val x = w / 2f + (i - camX) * scale
             scope.drawLine(Color.White.copy(alpha = 0.08f), Offset(x, 0f), Offset(x, h))
         }
-        scene.objects.filter { it.type != "Camera" && it.type != "Light" }.forEach { obj ->
+        snapObjects(scene).filter { it.type != "Camera" && it.type != "Light" }.forEach { obj ->
             val x = w / 2f + (obj.x - camX) * scale
             val y = h / 2f - (obj.y - camY) * scale
             val bw = maxOf(8f, kotlin.math.abs(obj.sx) * scale)
@@ -148,7 +163,7 @@ object SceneRenderer {
             }
         }
         val faces = mutableListOf<Face>()
-        scene.objects.filter { it.type != "Camera" }.forEach { obj ->
+        snapObjects(scene).filter { it.type != "Camera" }.forEach { obj ->
             faces += cubeFaces(obj, camX, camY, camZ, camRx, camRy, w, h, selected == obj.name)
         }
         faces.sortedByDescending { it.z }.forEach { face ->
@@ -160,7 +175,7 @@ object SceneRenderer {
             scope.drawPath(path, face.color)
             scope.drawPath(path, if (face.selected) Color.White else Color.Black.copy(alpha = 0.35f), style = Stroke(if (face.selected) 3f else 1f))
         }
-        scene.objects.filter { it.type != "Camera" && it.type != "Light" && it.enabled }.forEach { obj ->
+        snapObjects(scene).filter { it.type != "Camera" && it.type != "Light" && it.enabled }.forEach { obj ->
             val tip = project(obj.x, obj.y + kotlin.math.abs(obj.sy) * 0.6f, obj.z, camX, camY, camZ, camRx, camRy, w, h)
             if (tip != null && measurer != null) {
                 scope.drawText(
@@ -198,8 +213,8 @@ object SceneRenderer {
         }
         val quads = meshQuads(mesh, locals.size)
         val base = parseColor(obj.color)
-        val accent = parseColor(obj.extra.optString("accent", obj.color).ifBlank { obj.color })
-        val pattern = obj.extra.optString("pattern", "flat")
+        val accent = parseColor(extraStr(obj, "accent", obj.color))
+        val pattern = extraStr(obj, "pattern", "flat")
         return quads.mapIndexedNotNull { qi, idx ->
             val pts = idx.map { corners.getOrNull(it) }
             if (pts.any { it == null }) return@mapIndexedNotNull null

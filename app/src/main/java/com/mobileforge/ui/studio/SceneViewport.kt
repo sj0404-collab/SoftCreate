@@ -35,6 +35,6 @@ fun SceneViewport(
                 } else Modifier,
             ),
     ) {
-        SceneRenderer.draw(this, scene, selected, orbit, follow, measurer)
+        runCatching { SceneRenderer.draw(this, scene, selected, orbit, follow, measurer) }
     }
 }

@@ -52,6 +52,7 @@ fun UnityWorkspace(vm: AppViewModel) {
     var leftTab by remember { mutableStateOf(0) }
     var overlay by remember { mutableStateOf<Section?>(null) }
     val playing = vm.runtime?.playing == true
+    val epoch = vm.sceneEpoch
     BoxWithConstraints(Modifier.fillMaxSize().background(MfBg)) {
         val wide = maxWidth >= 640.dp
         Column(Modifier.fillMaxSize()) {
@@ -136,7 +137,7 @@ private fun DockTab(title: String, on: Boolean, click: () -> Unit) {
 private fun HierarchyDock(vm: AppViewModel) {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(6.dp)) {
         Text(vm.scene?.let { "${it.name}  ${it.dimension}" } ?: "Нет сцены", color = MfCyan, fontSize = 11.sp)
-        vm.scene?.objects.orEmpty().forEach { obj ->
+        runCatching { vm.scene?.objects?.toList().orEmpty() }.getOrDefault(emptyList()).forEach { obj ->
             Text(
                 "${if (obj.enabled) "●" else "○"} ${obj.name}  ${obj.type}",
                 color = if (obj.name == vm.selected) MfPurple else MfText,
