@@ -12,8 +12,20 @@ android {
         applicationId = "com.mobileforge"
         minSdk = 26
         targetSdk = 35
-        versionCode = 31
-        versionName = "2.7.0"
+        versionCode = 32
+        versionName = "2.8.0"
+    }
+
+    val sharedKs = System.getenv("ANDROID_KEYSTORE_PATH")
+    if (!sharedKs.isNullOrBlank()) {
+        signingConfigs {
+            create("shared") {
+                storeFile = file(sharedKs)
+                storePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("ANDROID_KEY_ALIAS")
+                keyPassword = System.getenv("ANDROID_KEY_PASSWORD")
+            }
+        }
     }
 
     buildTypes {
@@ -23,9 +35,11 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
+            signingConfigs.findByName("shared")?.let { signingConfig = it }
         }
         debug {
             isDebuggable = true
+            signingConfigs.findByName("shared")?.let { signingConfig = it }
         }
     }
 

@@ -113,7 +113,7 @@ data class SceneObject(
             "Ground", "Plane" -> "Plane"
             "Block" -> "Block"
             "Light", "Camera", "Empty" -> "Empty"
-            "Capsule", "Player" -> "Capsule"
+            "Capsule", "Player", "Npc", "NPC", "Human", "Villager" -> "Capsule"
             else -> "Cube"
         }
     }

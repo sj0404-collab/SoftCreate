@@ -140,6 +140,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     var streamTick by mutableStateOf(0)
     private var agentCancel = false
     private var lastDirectorTask = ""
+    private var lastSubstantialTask = ""
+    private var lastUtterance = ""
+    var agentLastLlmMs by mutableStateOf(0L)
+    var agentLastToolMs by mutableStateOf(0L)
     private val pluginHost = PluginHost()
     val pluginRecords = mutableStateListOf<PluginRecord>()
     val pluginLog = mutableStateListOf<String>()
@@ -192,7 +196,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         provider = prefs.getString("ai_provider", "zen").orEmpty().ifBlank { "zen" }
         model = prefs.getString("${provider}_model", ModelCatalog.defaultId(provider))
             .orEmpty().ifBlank { ModelCatalog.defaultId(provider) }
-        log("MobileForge 2.7 — Unity + VS + diff + живые плагины")
+        lastSubstantialTask = prefs.getString("last_order", "").orEmpty()
+        log("MobileForge 2.8 — память чата, русский, копировать/переслать, время, общий ключ")
     }
 
     fun notify(text: String) {
@@ -1060,6 +1065,22 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         log("Агент остановлен")
     }
 
+    fun copyText(text: String) {
+        if (text.isBlank()) return
+        val cm = getApplication<Application>()
+            .getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+        cm.setPrimaryClip(android.content.ClipData.newPlainText("mobileforge", text))
+        notify("Скопировано")
+    }
+
+    fun resendToAgent(text: String) {
+        val task = text.trim()
+        if (task.isBlank() || agentRunning) return
+        agentFeed += AgentEvent.User(System.nanoTime(), task)
+        streamTick++
+        runAgent(task)
+    }
+
     fun submitAgent() {
         val task = agentInput.trim()
         if (task.isBlank() || agentRunning) return
@@ -1069,42 +1090,91 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         runAgent(task)
     }
 
+    private fun sessionTranscript(limitChars: Int = 9000): String {
+        val sb = StringBuilder()
+        agentFeed.forEach { ev ->
+            when (ev) {
+                is AgentEvent.User -> sb.appendLine("РЕЖИССЁР: ${ev.text}")
+                is AgentEvent.Assistant -> {
+                    if (!ev.live && ev.text.isNotBlank()) sb.appendLine("АГЕНТ: ${ev.text.take(500)}")
+                }
+                is AgentEvent.Tool -> sb.appendLine("ИНСТРУМЕНТ ${ev.tool} (${Director.formatMs(ev.ms)}): ${ev.result.take(240)}")
+            }
+        }
+        val s = sb.toString()
+        return if (s.length <= limitChars) s else s.takeLast(limitChars)
+    }
+
     fun runAgent(task: String) {
-        lastDirectorTask = task
+        val follow = Director.isFollowUp(task)
+        if (!follow) {
+            lastSubstantialTask = task
+            prefs.edit().putString("last_order", task).apply()
+        }
+        val order = if (follow && lastSubstantialTask.isNotBlank()) lastSubstantialTask else task
+        lastDirectorTask = order
+        lastUtterance = task
         agentCancel = false
         agentRunning = true
         agentStatus = "работа"
         agentRound = 0
         agentToolsUsed = 0
         val started = System.currentTimeMillis()
-        val named = Director.extractProjectName(task)
+        val named = if (follow && !projectName.isNullOrBlank()) {
+            projectName
+        } else {
+            Director.extractProjectName(order)
+        }
+        val memory = sessionTranscript()
         val messages = mutableListOf(
             ChatTurn("system", AgentParser.SYSTEM.trimIndent()),
             ChatTurn(
                 "user",
                 buildString {
-                    appendLine("DIRECTOR ORDER (verbatim):")
-                    appendLine(task)
+                    appendLine("Язык: русский. Размышляй и отвечай только по-русски.")
                     appendLine()
+                    appendLine("ПЕРЕПИСКА СЕССИИ (не забывай, анализируй):")
+                    appendLine(memory.ifBlank { "(пусто — это первое сообщение)" })
+                    appendLine()
+                    appendLine("ИСХОДНЫЙ ЗАКАЗ РЕЖИССЁРА (выполнять до конца, не подменять пустышкой):")
+                    appendLine(order)
+                    appendLine()
+                    if (follow && task != order) {
+                        appendLine("ТЕКУЩАЯ РЕПЛИКА (это уточнение/вопрос, НЕ новый проект):")
+                        appendLine(task)
+                        appendLine("Не создавай новый проект и не меняй имя. Продолжи исходный заказ или ответь на вопрос.")
+                        appendLine()
+                    }
                     appendLine(
-                        if (named != null) {
-                            "Project name you MUST use: $named"
+                        if (!named.isNullOrBlank()) {
+                            "Имя проекта, которое нужно использовать: $named"
                         } else {
-                            "No name given. Invent a NEW unique name from the order. Never SkyArena."
+                            "Имени нет. Придумай НОВОЕ имя из заказа. Никогда SkyArena. Не используй предлоги как имя."
                         },
                     )
-                    appendLine("Active project: ${projectName ?: "none"}")
+                    appendLine("Открытый проект: ${projectName ?: "нет"}")
+                    appendLine("Папка проекта: ${projectPath()}")
                     if (scene != null) {
-                        appendLine("Active scene: ${scene?.name} ${scene?.dimension}")
-                        appendLine("Objects: ${scene?.objects?.joinToString { it.name + "/" + it.type }.orEmpty()}")
+                        appendLine("Сцена: ${scene?.name} ${scene?.dimension}")
+                        val objs = scene?.objects.orEmpty()
+                        appendLine("Объекты (${objs.size}): ${objs.joinToString { it.name + "/" + it.type }}")
+                        val real = objs.filter { it.type !in listOf("Camera", "Light") }
+                        if (real.isEmpty() && Director.wantsWorld(order)) {
+                            appendLine("СЦЕНА ПУСТАЯ. Заказ требует мир — добавь землю, биомы, персонажей, ассеты, скрипты. Не заканчивай.")
+                        }
                     }
-                    if (!Director.wantsControls(task)) {
-                        appendLine("Do NOT call controls.set. Director did not ask for touch UI.")
+                    if (!Director.wantsControls(order)) {
+                        appendLine("Не вызывай controls.set. Режиссёр не просил тач-UI.")
                     }
-                    if (!Director.wantsAnimation(task)) {
-                        appendLine("Do NOT add animations.")
+                    if (!Director.wantsAnimation(order)) {
+                        appendLine("Не добавляй анимации — их не просили.")
+                    } else {
+                        appendLine("Анимации просили — сделай через скрипты (движение/покачивание), не оставляй статичную пустышку.")
                     }
-                    appendLine("Create unique assets via asset.create for this game.")
+                    if (Director.wantsWorld(order)) {
+                        appendLine("Это заказ на мир/игру. Пустая сцена (камера+свет) = провал. Собери видимый мир.")
+                    }
+                    appendLine("Уникальные ассеты через asset.create. Люди = Capsule, земля = Plane, без фиолетовых Cube.")
                 },
             ),
         )
@@ -1121,6 +1191,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                         streamTick++
                     }
                     val main = android.os.Handler(android.os.Looper.getMainLooper())
+                    val llmStarted = System.currentTimeMillis()
                     val reply = withContext(Dispatchers.IO) {
                         ai.converseStream(
                             Provider.fromId(provider),
@@ -1162,6 +1233,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                             pushCard("модель", "fallback", "{}", "переключил на ${ModelCatalog.pretty(model)} · $nextProv", 0, true)
                         }
                     }
+                    val llmMs = System.currentTimeMillis() - llmStarted
+                    agentLastLlmMs = llmMs
                     agentTokens += reply.promptTokens + reply.completionTokens
                     val raw = StreamText.stripNullSpam(reply.text.ifBlank { reply.thinking })
                     messages += ChatTurn("assistant", raw)
@@ -1173,17 +1246,17 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                             if (cur != null) {
                                 val think = StreamText.stripNullSpam(cur.thinking.ifBlank { reply.thinking })
                                 val shown = when {
-                                    action.tool != null -> ""
+                                    action.tool != null -> action.say
                                     action.done && action.say.isNotBlank() -> action.say
                                     else -> StreamText.stripNullSpam(cur.text.ifBlank { reply.text })
                                 }
-                                agentFeed[idx] = cur.copy(text = shown, thinking = think, live = false)
+                                agentFeed[idx] = cur.copy(text = shown, thinking = think, live = false, ms = llmMs)
                                 streamTick++
                             }
                         }
                     }
                     if (action.done && action.tool == null) {
-                        pushCard("готово", "done", "{}", action.say.ifBlank { reply.text }, 0, true)
+                        pushCard("готово", "done", "{}", action.say.ifBlank { reply.text }, llmMs, true)
                         break
                     }
                     val tool = action.tool ?: "say"
@@ -1191,10 +1264,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     val result = runCatching { executeAgentTool(tool, action.args) }
                         .getOrElse { "ERROR: ${it.message}" }
                     val ms = System.currentTimeMillis() - t0
+                    agentLastToolMs = ms
                     agentToolsUsed++
                     pushCard(tool, tool, action.args.toString(), result, ms, !result.startsWith("ERROR"))
                     if (action.done || tool == "done") {
-                        if (action.say.isNotBlank()) pushCard("итог", "done", "{}", action.say, 0, true)
+                        if (action.say.isNotBlank()) pushCard("итог", "done", "{}", action.say, llmMs, true)
                         break
                     }
                     messages += ChatTurn("user", "TOOL_RESULT $tool:\n${result.take(4000)}")
@@ -1272,12 +1346,20 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private fun executeAgentTool(tool: String, args: org.json.JSONObject): String {
         return when (tool) {
             "project.create" -> {
-                val proposed = args.optString("name")
-                val name = Director.resolveName(lastDirectorTask, proposed)
-                val type = args.optString("type", "3d")
-                val created = store.create(name, type).getOrThrow()
-                openProject(created.name, navigate = false)
-                "created ${created.name}"
+                if (Director.isFollowUp(lastUtterance) && !projectName.isNullOrBlank()) {
+                    "SKIPPED: уже открыт $projectName — продолжай его, не создавай новый"
+                } else {
+                    val proposed = args.optString("name")
+                    val name = Director.resolveName(lastDirectorTask, proposed, projectName)
+                    if (!projectName.isNullOrBlank() && projectName.equals(name, true)) {
+                        "уже открыт $projectName"
+                    } else {
+                        val type = args.optString("type", "3d")
+                        val created = store.create(name, type).getOrThrow()
+                        openProject(created.name, navigate = false)
+                        "created ${created.name}"
+                    }
+                }
             }
             "project.list" -> store.projects().joinToString { it.name }.ifBlank { "(empty)" }
             "project.open" -> {

@@ -53,6 +53,7 @@ import com.mobileforge.AppViewModel
 import com.mobileforge.BuildConfig
 import com.mobileforge.Section
 import com.mobileforge.agent.AgentEvent
+import com.mobileforge.agent.Director
 import com.mobileforge.ai.ModelCatalog
 import com.mobileforge.ai.StreamText
 import com.mobileforge.ui.assets.AssetsScreen
@@ -87,6 +88,8 @@ private val tabs = listOf(
     Section.Files to ("▤" to "Файлы"),
     Section.Studio to ("⌘" to "Сцена"),
     Section.Ai to ("✎" to "Код"),
+    Section.Changes to ("Δ" to "Diff"),
+    Section.Plugins to ("☰" to "Плагины"),
     Section.Assets to ("◇" to "Ассеты"),
     Section.Play to ("▶" to "Play"),
     Section.Cloud to ("☁" to "Cloud"),
@@ -127,6 +130,8 @@ fun AgentScreen(vm: AppViewModel) {
                 Meta("инстр.", vm.agentToolsUsed.toString())
                 Meta("токены", vm.agentTokens.toString())
                 Text(" ${vm.agentElapsed}с", color = Mute, fontSize = 12.sp)
+                if (vm.agentLastLlmMs > 0) Meta("модель", Director.formatMs(vm.agentLastLlmMs))
+                if (vm.agentLastToolMs > 0) Meta("тул", Director.formatMs(vm.agentLastToolMs))
             }
             Text(
                 buildString {
@@ -216,17 +221,31 @@ private fun ChatPane(vm: AppViewModel) {
     ) {
         items(vm.agentFeed, key = { it.id }) { ev ->
             when (ev) {
-                is AgentEvent.User -> UserBubble(ev.text)
-                is AgentEvent.Assistant -> AssistantBubble(ev)
-                is AgentEvent.Tool -> ToolCard(ev) { vm.toggleCard(ev.id) }
+                is AgentEvent.User -> UserBubble(ev.text, onCopy = { vm.copyText(ev.text) }, onResend = { vm.resendToAgent(ev.text) })
+                is AgentEvent.Assistant -> AssistantBubble(
+                    ev,
+                    onCopy = {
+                        val blob = listOf(ev.thinking, ev.text).filter { it.isNotBlank() }.joinToString("\n\n")
+                        vm.copyText(blob)
+                    },
+                    onResend = {
+                        val lastUser = vm.agentFeed.filterIsInstance<AgentEvent.User>().lastOrNull()?.text
+                        if (!lastUser.isNullOrBlank()) vm.resendToAgent(lastUser)
+                    },
+                )
+                is AgentEvent.Tool -> ToolCard(
+                    ev,
+                    onToggle = { vm.toggleCard(ev.id) },
+                    onCopy = { vm.copyText("${ev.tool} (${Director.formatMs(ev.ms)})\n${ev.args}\n${ev.result}") },
+                )
             }
         }
     }
 }
 
 @Composable
-private fun UserBubble(text: String) {
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+private fun UserBubble(text: String, onCopy: () -> Unit, onResend: () -> Unit) {
+    Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.End) {
         Text(
             text,
             color = Ink,
@@ -237,11 +256,19 @@ private fun UserBubble(text: String) {
                 .background(UserBg)
                 .padding(horizontal = 12.dp, vertical = 8.dp),
         )
+        Row(
+            Modifier.padding(top = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            TinyAction("копировать", onCopy)
+            TinyAction("переслать", onResend)
+        }
     }
 }
 
 @Composable
-private fun AssistantBubble(ev: AgentEvent.Assistant) {
+private fun AssistantBubble(ev: AgentEvent.Assistant, onCopy: () -> Unit, onResend: () -> Unit) {
     Column(
         Modifier
             .fillMaxWidth()
@@ -251,8 +278,13 @@ private fun AssistantBubble(ev: AgentEvent.Assistant) {
     ) {
         val think = StreamText.stripNullSpam(ev.thinking)
         val body = StreamText.stripNullSpam(ev.text)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("агент", color = Mute, fontSize = 11.sp)
+            Spacer(Modifier.weight(1f))
+            if (ev.ms > 0) Text(Director.formatMs(ev.ms), color = Mute, fontSize = 11.sp)
+        }
         if (think.isNotBlank()) {
-            Text("размышление", color = Think, fontSize = 11.sp)
+            Text("размышление", color = Think, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp))
             Text(think, color = Think, fontSize = 13.sp, lineHeight = 18.sp)
             Spacer(Modifier.height(8.dp))
         }
@@ -261,11 +293,18 @@ private fun AssistantBubble(ev: AgentEvent.Assistant) {
         } else if (ev.live) {
             Text("печатает…", color = Mute, fontSize = 13.sp)
         }
+        Row(
+            Modifier.padding(top = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            TinyAction("копировать", onCopy)
+            TinyAction("переслать", onResend)
+        }
     }
 }
 
 @Composable
-private fun ToolCard(ev: AgentEvent.Tool, onToggle: () -> Unit) {
+private fun ToolCard(ev: AgentEvent.Tool, onToggle: () -> Unit, onCopy: () -> Unit) {
     Column(
         Modifier
             .fillMaxWidth()
@@ -280,8 +319,14 @@ private fun ToolCard(ev: AgentEvent.Tool, onToggle: () -> Unit) {
             Spacer(Modifier.width(8.dp))
             Text(ev.title, color = Ink, fontSize = 15.sp, fontWeight = FontWeight.Medium)
             Spacer(Modifier.weight(1f))
-            Text("${ev.ms}ms", color = Mute, fontSize = 12.sp)
+            Text(Director.formatMs(ev.ms), color = Teal, fontSize = 12.sp)
         }
+        Text(
+            "инструмент · ${Director.formatMs(ev.ms)}",
+            color = Mute,
+            fontSize = 11.sp,
+            modifier = Modifier.padding(top = 2.dp),
+        )
         if (ev.expanded) {
             Spacer(Modifier.height(8.dp))
             Text(ev.args, color = Mute, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
@@ -290,7 +335,23 @@ private fun ToolCard(ev: AgentEvent.Tool, onToggle: () -> Unit) {
         } else {
             Text(ev.result.take(90).replace("\n", " "), color = Mute, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
         }
+        Row(Modifier.padding(top = 6.dp)) {
+            TinyAction("копировать", onCopy)
+        }
     }
+}
+
+@Composable
+private fun TinyAction(label: String, onClick: () -> Unit) {
+    Text(
+        label,
+        color = Teal,
+        fontSize = 12.sp,
+        modifier = Modifier
+            .clip(RoundedCornerShape(8.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 8.dp, vertical = 4.dp),
+    )
 }
 
 @Composable
