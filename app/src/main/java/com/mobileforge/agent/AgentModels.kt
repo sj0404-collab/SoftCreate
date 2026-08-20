@@ -46,60 +46,151 @@ data class AgentAction(
 object AgentParser {
     fun parse(raw: String): AgentAction {
         val cleaned = raw.replace(Regex("(?:null){2,}"), "")
-        val json = extractJson(cleaned) ?: return AgentAction(null, JSONObject(), true, cleaned.trim())
-        val done = json.optBoolean("done") || json.optString("tool") == "done"
-        val tool = if (json.isNull("tool")) null else json.optString("tool").takeIf { it.isNotBlank() && it != "null" }
-        val args = json.optJSONObject("args") ?: JSONObject()
-        json.keys().forEach { key ->
-            if (key != "tool" && key != "args" && key != "done" && key != "say") {
-                if (!args.has(key)) args.put(key, json.get(key))
+        val xml = parseXmlTool(cleaned)
+        val json = extractJson(cleaned)
+        if (json != null) {
+            val done = json.optBoolean("done") || json.optString("tool") == "done"
+            val tool = if (json.isNull("tool")) null else json.optString("tool").takeIf { it.isNotBlank() && it != "null" && it != "done" }
+            val args = json.optJSONObject("args") ?: JSONObject()
+            json.keys().forEach { key ->
+                if (key != "tool" && key != "args" && key != "done" && key != "say" && key != "message") {
+                    if (!args.has(key)) args.put(key, json.get(key))
+                }
             }
+            val say = listOf("say", "message").firstNotNullOfOrNull { key ->
+                if (json.isNull(key)) null else json.optString(key).takeIf { it.isNotBlank() && it != "null" }
+            }.orEmpty().ifBlank { xml?.say.orEmpty() }.ifBlank { humanText(cleaned) }
+            if (tool != null) return AgentAction(tool, args, false, say)
+            if (done) return AgentAction(null, args, true, say)
         }
-        val say = listOf("say", "message").firstNotNullOfOrNull { key ->
-            if (json.isNull(key)) null else json.optString(key).takeIf { it.isNotBlank() && it != "null" }
-        }.orEmpty()
-        return AgentAction(tool, args, done, say)
+        if (xml != null) return xml
+        val say = humanText(cleaned)
+        val attempt = looksLikeTool(cleaned)
+        return AgentAction(null, JSONObject(), done = !attempt, say = say)
+    }
+
+    fun looksLikeTool(raw: String): Boolean {
+        val s = raw.lowercase()
+        return "<tool_call" in s || "</tool_call>" in s || "\"tool\"" in s ||
+            Regex("""\b(project|scene|fs|asset|plugin|play|controls)\.\w+""").containsMatchIn(s)
+    }
+
+    fun parseXmlTool(raw: String): AgentAction? {
+        val block = Regex("(?is)<tool_call>(.*?)</tool_call>").find(raw) ?: return null
+        val inner = block.groupValues[1]
+        val args = JSONObject()
+        Regex("(?is)<arg_key>\\s*(.*?)\\s*</arg_key>\\s*<arg_value>\\s*(.*?)\\s*</arg_value>")
+            .findAll(inner)
+            .forEach { m ->
+                val k = m.groupValues[1].trim()
+                val v = m.groupValues[2].trim()
+                if (k.isNotBlank()) args.put(k, v)
+            }
+        val name = inner.replace(Regex("(?is)<arg_key>[\\s\\S]*"), "").replace(Regex("<[^>]+>"), "").trim()
+        if (name.isBlank() || ' ' in name) {
+            val fallback = Regex("(?is)(project|scene|fs|asset|plugin|play|controls)\\.[a-z_.]+").find(inner)?.value
+            if (fallback.isNullOrBlank()) return null
+            val say = humanText(raw)
+            return AgentAction(fallback, args, false, say)
+        }
+        return AgentAction(name, args, false, humanText(raw))
+    }
+
+    fun humanText(raw: String): String {
+        var s = raw.replace(Regex("(?:null){2,}"), "")
+        s = Regex("(?is)<tool_call>[\\s\\S]*?</tool_call>").replace(s, " ")
+        s = Regex("(?is)</?tool_call>").replace(s, " ")
+        s = Regex("(?is)<arg_(?:key|value)>[\\s\\S]*?</arg_(?:key|value)>").replace(s, " ")
+        s = Regex("(?is)<(?:think|thinking|reason|reasoning)>[\\s\\S]*?</(?:think|thinking|reason|reasoning)>").replace(s, " ")
+        s = stripJsonObjects(s)
+        s = s.replace(Regex("(?im)^\\s*Let\\s*$"), " ")
+        s = s.replace("```json", " ").replace("```", " ")
+        s = s.replace(Regex("[ \\t]+"), " ")
+        s = s.replace(Regex("\\n{3,}"), "\n\n").trim()
+        return s.take(800)
+    }
+
+    private fun stripJsonObjects(raw: String): String {
+        val sb = StringBuilder()
+        var i = 0
+        while (i < raw.length) {
+            if (raw[i] == '{') {
+                val end = matchBrace(raw, i)
+                if (end > i) {
+                    i = end + 1
+                    continue
+                }
+            }
+            sb.append(raw[i])
+            i++
+        }
+        return sb.toString()
     }
 
     data class View(val thinking: String, val say: String, val json: String)
 
     fun display(raw: String, streamedThinking: String = ""): View {
-        var s = raw.replace(Regex("(?:null){2,}"), "")
-        val think = StringBuilder()
-        if (streamedThinking.isNotBlank()) {
-            think.appendLine(streamedThinking.replace(Regex("(?:null){2,}"), "").trim())
-        }
-        val tag = Regex("(?is)<(?:think|thinking|reason|reasoning)>(.*?)</(?:think|thinking|reason|reasoning)>")
-        tag.findAll(s).forEach { think.appendLine(it.groupValues[1].trim()) }
-        s = tag.replace(s, " ")
-        val startIdx = s.indexOf('{')
-        val prose = if (startIdx < 0) s.trim() else s.take(startIdx).trim()
-        if (prose.isNotBlank() && !prose.startsWith("```") && !prose.startsWith("{")) {
-            think.appendLine(prose)
-        }
-        val json = if (startIdx >= 0) s.substring(startIdx) else ""
-        val sayMatch = Regex("\"say\"\\s*:\\s*\"(.*?)\"", RegexOption.DOT_MATCHES_ALL).find(json)
-        var say = sayMatch?.groupValues?.get(1).orEmpty()
-        val quote = say.indexOf('"')
-        if (quote >= 0) say = say.take(quote)
-        say = say.replace("\\n", "\n").replace("\\\"", "\"")
-        return View(think.toString().trim(), say, json)
+        val action = parse(raw)
+        var think = humanText(streamedThinking)
+        val fromRaw = humanText(raw)
+        if (think.isBlank()) think = fromRaw
+        val say = action.say.ifBlank { fromRaw }
+        val json = extractJson(raw)?.toString() ?: parseXmlTool(raw)?.let { "{\"tool\":\"${it.tool}\"}" }.orEmpty()
+        val cleanThink = think.replace(say, "").trim().ifBlank { think }
+        val thinking = if (cleanThink == say) "" else cleanThink
+        return View(thinking, say, json)
     }
 
     fun extractJson(raw: String): JSONObject? {
         val trimmed = raw.trim()
         val fence = Regex("```(?:json)?\\s*([\\s\\S]*?)```").find(trimmed)
         val candidate = fence?.groupValues?.get(1)?.trim() ?: trimmed
-        val start = candidate.indexOf('{')
-        val end = candidate.lastIndexOf('}')
-        if (start < 0 || end <= start) return null
-        return runCatching { JSONObject(candidate.substring(start, end + 1)) }.getOrNull()
+        var i = 0
+        while (i < candidate.length) {
+            val start = candidate.indexOf('{', i)
+            if (start < 0) return null
+            val end = matchBrace(candidate, start)
+            if (end > start) {
+                val obj = runCatching { JSONObject(candidate.substring(start, end + 1)) }.getOrNull()
+                if (obj != null && (obj.has("tool") || obj.has("done") || obj.has("say") || obj.has("args"))) {
+                    return obj
+                }
+            }
+            i = start + 1
+        }
+        return null
+    }
+
+    private fun matchBrace(text: String, open: Int): Int {
+        var depth = 0
+        var i = open
+        var inStr = false
+        var escape = false
+        while (i < text.length) {
+            val c = text[i]
+            when {
+                inStr && escape -> escape = false
+                inStr && c == '\\' -> escape = true
+                c == '"' -> {
+                    inStr = !inStr
+                    escape = false
+                }
+                !inStr && c == '{' -> depth++
+                !inStr && c == '}' -> {
+                    depth--
+                    if (depth == 0) return i
+                }
+                else -> escape = false
+            }
+            i++
+        }
+        return -1
     }
 
     const val SYSTEM = """
 Ты агент MobileForge на телефоне. Человек — РЕЖИССЁР. Ты только выполняешь его заказ.
 Думай и пиши ТОЛЬКО по-русски: и размышления, и say. Никакого английского в тексте для человека.
-Ответ — ОДИН JSON-объект. Никогда слово null. Без markdown.
+Ответ — ОДИН JSON-объект. Никогда слово null. Без markdown. ЗАПРЕЩЕНО XML: <tool_call>, arg_key, arg_value. Запрещено несколько JSON подряд и слово Let.
 
 Инструмент: {"tool":"NAME","args":{...},"say":"кратко по-русски что делаешь"}
 Финиш: {"done":true,"say":"итог по-русски: что создано"}

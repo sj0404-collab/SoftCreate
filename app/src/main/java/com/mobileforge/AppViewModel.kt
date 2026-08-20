@@ -209,7 +209,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             openProject(lastProj, navigate = false)
         }
         installCrashGuard()
-        log("MobileForge 2.9.1 — лента листается во время печати")
+        log("MobileForge 2.9.2 — реальные инструменты, не XML-заглушки")
     }
 
 
@@ -1389,8 +1389,24 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                         }
                         persistFeed()
                     }
+                    if (action.tool == null && !action.done) {
+                        messages += ChatTurn(
+                            "user",
+                            "Это не вызов инструмента. Запрещён XML <tool_call>. Ответь ОДНИМ JSON: {\"tool\":\"project.list\",\"args\":{},\"say\":\"кратко\"}. Без markdown.",
+                        )
+                        continue
+                    }
                     if (action.done && action.tool == null) {
-                        pushCard("готово", "done", "{}", action.say.ifBlank { reply.text }, llmMs, true)
+                        val say = AgentParser.humanText(action.say.ifBlank { reply.text })
+                        if (say.isNotBlank()) {
+                            withContext(Dispatchers.Main) {
+                                val idx = agentFeed.indexOfFirst { it.id == liveId }
+                                if (idx >= 0) {
+                                    val cur = agentFeed[idx] as? AgentEvent.Assistant
+                                    if (cur != null) agentFeed[idx] = cur.copy(text = say, live = false, ms = llmMs)
+                                }
+                            }
+                        }
                         break
                     }
                     val tool = action.tool ?: "say"
