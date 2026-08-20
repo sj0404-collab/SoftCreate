@@ -37,7 +37,6 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -70,7 +69,6 @@ import com.mobileforge.ui.plugins.PluginsScreen
 import com.mobileforge.ui.studio.FilesScreen
 import com.mobileforge.ui.unity.UnityWorkspace
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.distinctUntilChanged
 
 private val Bg = Color(0xFF0C0C0E)
 private val Bar = Color(0xFF141416)
@@ -201,19 +199,9 @@ private fun TabStrip(vm: AppViewModel) {
 @Composable
 private fun ChatPane(vm: AppViewModel) {
     val state = rememberLazyListState()
-    var stickBottom by remember { mutableStateOf(true) }
-    LaunchedEffect(state) {
-        snapshotFlow {
-            val info = state.layoutInfo
-            val lastVisible = info.visibleItemsInfo.lastOrNull()?.index ?: 0
-            val last = (info.totalItemsCount - 1).coerceAtLeast(0)
-            state.isScrollInProgress to (lastVisible >= last)
-        }.distinctUntilChanged().collect { (dragging, atEnd) ->
-            if (dragging) stickBottom = atEnd
-        }
-    }
-    LaunchedEffect(vm.agentFeed.size) {
-        if (stickBottom && vm.agentFeed.isNotEmpty() && !state.isScrollInProgress) {
+    LaunchedEffect(vm.agentFeed.size, vm.agentRunning) {
+        if (vm.agentRunning) return@LaunchedEffect
+        if (vm.agentFeed.isNotEmpty() && !state.isScrollInProgress) {
             runCatching { state.scrollToItem(vm.agentFeed.lastIndex) }
         }
     }

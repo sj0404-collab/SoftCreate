@@ -195,7 +195,6 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         refreshProviderFlags()
         refreshGithub()
         refreshMcp()
-        refreshPack()
         boundRepo = prefs.getString("gh_bound_repo", "").orEmpty()
         customEndpoint = prefs.getString("custom_endpoint", "").orEmpty()
         provider = prefs.getString("ai_provider", "zen").orEmpty().ifBlank { "zen" }
@@ -209,16 +208,18 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             openProject(lastProj, navigate = false)
         }
         installCrashGuard()
-        log("MobileForge 2.9.2 — реальные инструменты, не XML-заглушки")
+        log("MobileForge 2.9.3 — UI не блокируется на стриме")
     }
 
 
     private fun feedFile(): File = File(getApplication<Application>().filesDir, "agent_feed.json")
 
     private fun persistFeed() {
+        val snap = try { agentFeed.toList() } catch (_: Exception) { return }
+        viewModelScope.launch(Dispatchers.IO) {
         runCatching {
             val arr = JSONArray()
-            agentFeed.takeLast(150).forEach { ev ->
+            snap.takeLast(150).forEach { ev ->
                 val o = JSONObject()
                 when (ev) {
                     is AgentEvent.User -> o.put("k", "u").put("id", ev.id).put("t", ev.text)
@@ -231,6 +232,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 arr.put(o)
             }
             feedFile().writeText(arr.toString())
+        }
         }
     }
 
@@ -290,21 +292,34 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun go(next: Section) {
         if (next != Section.Play) runtime?.stop()
         section = next
-        when (next) {
-            Section.Projects -> refreshProjects()
-            Section.Files, Section.Studio, Section.Assets, Section.Ai, Section.Changes, Section.Plugins -> {
-                refreshFiles()
-                refreshScenes()
-                refreshPack()
-                if (next == Section.Plugins) reloadPlugins()
-                if (next == Section.Changes) reloadChanges()
-                if (next == Section.Ai) scanIdeErrors()
+        viewModelScope.launch(Dispatchers.IO) {
+            when (next) {
+                Section.Projects -> withContext(Dispatchers.Main) { refreshProjects() }
+                Section.Files, Section.Studio -> withContext(Dispatchers.Main) {
+                    refreshFiles()
+                    refreshScenes()
+                }
+                Section.Assets -> {
+                    withContext(Dispatchers.Main) { refreshFiles() }
+                    refreshPack()
+                }
+                Section.Ai -> withContext(Dispatchers.Main) {
+                    refreshFiles()
+                    scanIdeErrors()
+                }
+                Section.Changes -> withContext(Dispatchers.Main) {
+                    refreshFiles()
+                    reloadChanges()
+                }
+                Section.Plugins -> withContext(Dispatchers.Main) {
+                    refreshFiles()
+                    reloadPlugins()
+                }
+                Section.Settings -> withContext(Dispatchers.Main) { refreshProviderFlags() }
+                Section.Cloud -> withContext(Dispatchers.Main) { refreshGithub() }
+                Section.Mcp -> withContext(Dispatchers.Main) { refreshMcp() }
+                else -> {}
             }
-            Section.Play -> {}
-            Section.Settings -> refreshProviderFlags()
-            Section.Cloud -> refreshGithub()
-            Section.Mcp -> refreshMcp()
-            Section.Agent -> {}
         }
     }
 
@@ -396,25 +411,34 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         store.files(project).forEach { files += FileItem(it.relativePath, it.file.name) }
     }
 
+    private var packLoaded = false
     fun refreshPack() {
-        pack.clear()
+        if (packLoaded) return
+        val collected = ArrayList<PackItem>()
         runCatching {
             val am = getApplication<Application>().assets
             fun walk(prefix: String) {
                 val kids = am.list(prefix) ?: return
                 if (kids.isEmpty() && prefix.contains('.')) {
-                    pack += PackItem(prefix, prefix.substringAfterLast('.'))
+                    collected += PackItem(prefix, prefix.substringAfterLast('.'))
                     return
                 }
                 kids.forEach { name ->
                     val path = if (prefix.isBlank()) name else "$prefix/$name"
                     val nested = am.list(path)
-                    if (nested.isNullOrEmpty()) pack += PackItem(path, name.substringAfterLast('.'))
+                    if (nested.isNullOrEmpty()) collected += PackItem(path, name.substringAfterLast('.'))
                     else walk(path)
                 }
             }
             walk("StudioPack")
         }
+        packLoaded = true
+        val apply = Runnable {
+            pack.clear()
+            collected.forEach { pack += it }
+        }
+        if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) apply.run()
+        else android.os.Handler(android.os.Looper.getMainLooper()).post(apply)
     }
 
     fun openFile(path: String) {
@@ -1315,6 +1339,45 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     }
                     val main = android.os.Handler(android.os.Looper.getMainLooper())
                     val llmStarted = System.currentTimeMillis()
+                    val accRaw = StringBuilder()
+                    val accThink = StringBuilder()
+                    val accLock = Any()
+                    var lastUi = 0L
+                    var uiPosted = false
+                    fun paintLive(force: Boolean) {
+                        val now = System.currentTimeMillis()
+                        if (!force && now - lastUi < 90L) {
+                            if (!uiPosted) {
+                                uiPosted = true
+                                main.postDelayed({
+                                    uiPosted = false
+                                    paintLive(true)
+                                }, 90L)
+                            }
+                            return
+                        }
+                        lastUi = now
+                        val rawSnap: String
+                        val thinkSnap: String
+                        synchronized(accLock) {
+                            rawSnap = accRaw.toString()
+                            thinkSnap = accThink.toString()
+                        }
+                        main.post {
+                            val idx = agentFeed.indexOfFirst { it.id == liveId }
+                            if (idx < 0) return@post
+                            val cur = agentFeed[idx] as? AgentEvent.Assistant ?: return@post
+                            val cut = rawSnap.indexOf('{').let { if (it < 0) rawSnap.indexOf("<tool") else it }
+                            val prose = if (cut >= 0) rawSnap.take(cut).trim() else rawSnap.trim()
+                            val think = thinkSnap.ifBlank { prose }.takeLast(8000)
+                            agentFeed[idx] = cur.copy(
+                                text = "",
+                                thinking = think,
+                                raw = rawSnap,
+                                live = true,
+                            )
+                        }
+                    }
                     val reply = withContext(Dispatchers.IO) {
                         ai.converseStream(
                             Provider.fromId(provider),
@@ -1323,29 +1386,19 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                             customEndpoint,
                             abort = { agentCancel },
                         ) { delta ->
-                            main.post {
-                                val idx = agentFeed.indexOfFirst { it.id == liveId }
-                                if (idx >= 0) {
-                                    val cur = agentFeed[idx] as? AgentEvent.Assistant ?: return@post
-                                    if (delta.reset) {
-                                        agentFeed[idx] = cur.copy(text = "", raw = "", live = true)
-                                    } else {
-                                        val piece = StreamText.clean(delta.text)
-                                        val reason = StreamText.clean(delta.thinking)
-                                        if (piece.isEmpty() && reason.isEmpty()) return@post
-                                        val rawAcc = StreamText.stripNullSpam(cur.raw + piece)
-                                        val thinkAcc = StreamText.stripNullSpam(cur.thinking + reason)
-                                        val view = AgentParser.display(rawAcc, thinkAcc)
-                                        agentFeed[idx] = cur.copy(
-                                            text = view.say,
-                                            thinking = view.thinking.ifBlank { thinkAcc },
-                                            raw = rawAcc,
-                                            live = true,
-                                        )
-                                    }
-                                    streamTick++
-                                }
+                            if (delta.reset) {
+                                synchronized(accLock) { accRaw.setLength(0); accThink.setLength(0) }
+                                paintLive(true)
+                                return@converseStream
                             }
+                            val piece = StreamText.clean(delta.text)
+                            val reason = StreamText.clean(delta.thinking)
+                            if (piece.isEmpty() && reason.isEmpty()) return@converseStream
+                            synchronized(accLock) {
+                                if (piece.isNotEmpty()) accRaw.append(piece)
+                                if (reason.isNotEmpty()) accThink.append(reason)
+                            }
+                            paintLive(false)
                         }
                     }.getOrElse {
                         pushCard("ошибка", "error", "{}", StreamText.humanError(it), 0, false)
@@ -1360,13 +1413,15 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                             pushCard("модель", "fallback", "{}", "переключил на ${ModelCatalog.pretty(model)} · $nextProv", 0, true)
                         }
                     }
+                    paintLive(true)
                     val llmMs = System.currentTimeMillis() - llmStarted
                     agentLastLlmMs = llmMs
                     agentTokens += reply.promptTokens + reply.completionTokens
+                    val accSnap = synchronized(accLock) { accRaw.toString() }
                     val liveRaw = withContext(Dispatchers.Main) {
                         (agentFeed.firstOrNull { it.id == liveId } as? AgentEvent.Assistant)?.raw.orEmpty()
                     }
-                    val raw = StreamText.stripNullSpam(reply.text.ifBlank { liveRaw.ifBlank { reply.thinking } })
+                    val raw = StreamText.stripNullSpam(reply.text.ifBlank { accSnap.ifBlank { liveRaw.ifBlank { reply.thinking } } })
                     messages += ChatTurn("assistant", raw)
                     val action = AgentParser.parse(raw)
                     val view = AgentParser.display(raw, reply.thinking)
