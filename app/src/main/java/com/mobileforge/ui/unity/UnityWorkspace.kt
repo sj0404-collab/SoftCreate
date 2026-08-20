@@ -6,6 +6,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -51,83 +52,84 @@ fun UnityWorkspace(vm: AppViewModel) {
     var leftTab by remember { mutableStateOf(0) }
     var overlay by remember { mutableStateOf<Section?>(null) }
     val playing = vm.runtime?.playing == true
-    Column(Modifier.fillMaxSize().background(MfBg)) {
-        Row(
-            Modifier.fillMaxWidth().background(MfPanel).padding(horizontal = 8.dp, vertical = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            Text("MF", color = MfPurple, fontSize = 14.sp)
-            Text(vm.projectName ?: "No Project", color = MfText, fontSize = 13.sp)
-            Text(vm.scene?.name ?: "—", color = MfCyan, fontSize = 11.sp)
-            MfButton(if (playing) "■ Stop" else "▶ Play", primary = !playing) {
-                if (playing) vm.stopPlay() else vm.startPlay()
-            }
-            MfButton("＋ Cube") { vm.addObject("Mesh") }
-            MfButton("＋ Light") { vm.addObject("Light") }
-            MfButton("＋ Cam") { vm.addObject("Camera") }
-            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                MfButton("Projects") { overlay = if (overlay == Section.Projects) null else Section.Projects }
-                MfButton("AI") { vm.go(Section.Agent) }
-                MfButton("Cloud") { overlay = if (overlay == Section.Cloud) null else Section.Cloud }
-                MfButton("MCP") { overlay = if (overlay == Section.Mcp) null else Section.Mcp }
-                MfButton("Assets") { overlay = if (overlay == Section.Assets) null else Section.Assets }
-                MfButton("Settings") { overlay = if (overlay == Section.Settings) null else Section.Settings }
-            }
-        }
-        Row(Modifier.weight(1f).fillMaxWidth()) {
-            Column(Modifier.width(200.dp).fillMaxHeight().background(MfPanel).border(1.dp, MfLine)) {
-                Row(Modifier.fillMaxWidth()) {
-                    DockTab("Hierarchy", leftTab == 0) { leftTab = 0 }
-                    DockTab("Project", leftTab == 1) { leftTab = 1 }
+    BoxWithConstraints(Modifier.fillMaxSize().background(MfBg)) {
+        val wide = maxWidth >= 640.dp
+        Column(Modifier.fillMaxSize()) {
+            Row(
+                Modifier.fillMaxWidth().background(MfPanel).padding(horizontal = 8.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Text("Unity", color = MfPurple, fontSize = 14.sp)
+                Text(vm.projectName ?: "No Project", color = MfText, fontSize = 13.sp)
+                Text(vm.scene?.name ?: "—", color = MfCyan, fontSize = 11.sp)
+                MfButton(if (playing) "■ Stop" else "▶ Play", primary = !playing) {
+                    if (playing) vm.stopPlay() else vm.startPlay()
                 }
-                if (leftTab == 0) HierarchyDock(vm) else ProjectDock(vm)
+                MfButton("＋ Cube") { vm.addObject("Mesh") }
+                MfButton("＋ Light") { vm.addObject("Light") }
+                MfButton("＋ Cam") { vm.addObject("Camera") }
             }
-            Column(Modifier.weight(1f).fillMaxHeight()) {
-                Box(Modifier.weight(1f).fillMaxWidth().background(MfBg).border(1.dp, MfLine)) {
-                    when {
-                        overlay != null -> OverlayPanel(vm, overlay!!)
-                        playing -> PlayScreen(vm, Modifier.fillMaxSize())
-                        else -> SceneViewport(
-                            scene = vm.scene,
-                            selected = vm.selected,
-                            orbit = vm.orbit,
-                            modifier = Modifier.fillMaxSize(),
-                        )
+            if (wide) {
+                Row(Modifier.weight(1f).fillMaxWidth()) {
+                    Column(Modifier.width(180.dp).fillMaxHeight().background(MfPanel).border(1.dp, MfLine)) {
+                        Row {
+                            DockTab("Hierarchy", leftTab == 0) { leftTab = 0 }
+                            DockTab("Project", leftTab == 1) { leftTab = 1 }
+                        }
+                        if (leftTab == 0) HierarchyDock(vm) else ProjectDock(vm)
                     }
-                    if (overlay == null && !playing) {
-                        Text("Scene", color = MfMuted, fontSize = 11.sp, modifier = Modifier.padding(8.dp))
-                    }
-                    if (playing && overlay == null) {
-                        Text("Game", color = MfCyan, fontSize = 11.sp, modifier = Modifier.padding(8.dp))
+                    SceneColumn(vm, overlay, playing, Modifier.weight(1f).fillMaxHeight())
+                    Column(Modifier.width(220.dp).fillMaxHeight().background(MfPanel).border(1.dp, MfLine)) {
+                        Text("Inspector", color = MfMuted, fontSize = 11.sp, modifier = Modifier.padding(8.dp))
+                        InspectorPanel(vm, Modifier.fillMaxSize())
                     }
                 }
-                Column(
-                    Modifier.fillMaxWidth().height(92.dp).background(MfPanel).border(1.dp, MfLine).padding(8.dp),
-                ) {
-                    Text("Console", color = MfMuted, fontSize = 11.sp)
-                    vm.console.take(4).forEach {
-                        Text(it, color = MfText, fontSize = 11.sp, maxLines = 1)
+            } else {
+                Column(Modifier.weight(1f).fillMaxWidth()) {
+                    Row(Modifier.fillMaxWidth().height(150.dp)) {
+                        Column(Modifier.weight(1f).fillMaxHeight().background(MfPanel).border(1.dp, MfLine)) {
+                            Row {
+                                DockTab("Hierarchy", leftTab == 0) { leftTab = 0 }
+                                DockTab("Project", leftTab == 1) { leftTab = 1 }
+                            }
+                            if (leftTab == 0) HierarchyDock(vm) else ProjectDock(vm)
+                        }
+                        Column(Modifier.weight(1f).fillMaxHeight().background(MfPanel).border(1.dp, MfLine)) {
+                            Text("Inspector", color = MfMuted, fontSize = 11.sp, modifier = Modifier.padding(4.dp))
+                            InspectorPanel(vm, Modifier.fillMaxSize())
+                        }
                     }
-                    if (vm.console.isEmpty()) Text("Нет сообщений", color = MfMuted, fontSize = 11.sp)
+                    SceneColumn(vm, overlay, playing, Modifier.weight(1f).fillMaxWidth())
                 }
-            }
-            Column(Modifier.width(240.dp).fillMaxHeight().background(MfPanel).border(1.dp, MfLine)) {
-                Text("Inspector", color = MfMuted, fontSize = 11.sp, modifier = Modifier.padding(8.dp))
-                InspectorPanel(vm, Modifier.fillMaxSize())
             }
         }
     }
 }
 
 @Composable
+private fun SceneColumn(vm: AppViewModel, overlay: Section?, playing: Boolean, modifier: Modifier) {
+    Column(modifier) {
+        Box(Modifier.weight(1f).fillMaxWidth().background(MfBg).border(1.dp, MfLine)) {
+            when {
+                overlay != null -> OverlayPanel(vm, overlay)
+                playing -> PlayScreen(vm, Modifier.fillMaxSize())
+                else -> SceneViewport(scene = vm.scene, selected = vm.selected, orbit = vm.orbit, modifier = Modifier.fillMaxSize())
+            }
+            if (overlay == null && !playing) Text("Scene", color = MfMuted, fontSize = 11.sp, modifier = Modifier.padding(8.dp))
+            if (playing && overlay == null) Text("Game", color = MfCyan, fontSize = 11.sp, modifier = Modifier.padding(8.dp))
+        }
+        Column(Modifier.fillMaxWidth().height(72.dp).background(MfPanel).border(1.dp, MfLine).padding(8.dp)) {
+            Text("Console", color = MfMuted, fontSize = 11.sp)
+            vm.console.take(2).forEach { Text(it, color = MfText, fontSize = 11.sp, maxLines = 1) }
+            if (vm.console.isEmpty()) Text("Нет сообщений", color = MfMuted, fontSize = 11.sp)
+        }
+    }
+}
+
+@Composable
 private fun DockTab(title: String, on: Boolean, click: () -> Unit) {
-    Text(
-        title,
-        color = if (on) MfPurple else MfMuted,
-        fontSize = 12.sp,
-        modifier = Modifier.clickable(onClick = click).padding(8.dp),
-    )
+    Text(title, color = if (on) MfPurple else MfMuted, fontSize = 12.sp, modifier = Modifier.clickable(onClick = click).padding(8.dp))
 }
 
 @Composable
@@ -142,14 +144,14 @@ private fun HierarchyDock(vm: AppViewModel) {
                 modifier = Modifier.fillMaxWidth().clickable { vm.selectObject(obj.name) }.padding(vertical = 5.dp),
             )
         }
-        if (vm.scene == null) Text("Откройте проект — объекты появятся здесь", color = MfMuted, fontSize = 12.sp)
+        if (vm.scene == null) Text("Откройте проект", color = MfMuted, fontSize = 12.sp)
     }
 }
 
 @Composable
 private fun ProjectDock(vm: AppViewModel) {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(6.dp)) {
-        if (vm.files.isEmpty()) Text("Нет файлов проекта", color = MfMuted, fontSize = 12.sp)
+        if (vm.files.isEmpty()) Text("Нет файлов", color = MfMuted, fontSize = 12.sp)
         vm.files.groupBy { it.path.substringBeforeLast('/', "/") }.forEach { (dir, list) ->
             Text(dir, color = MfCyan, fontSize = 11.sp, modifier = Modifier.padding(top = 6.dp))
             list.forEach { file ->

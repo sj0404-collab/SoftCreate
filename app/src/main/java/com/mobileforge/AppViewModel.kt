@@ -33,14 +33,18 @@ import com.mobileforge.export.HtmlPreview
 import com.mobileforge.mcp.McpHub
 import com.mobileforge.mcp.McpServer
 import com.mobileforge.mcp.McpTool
-import com.mobileforge.plugins.PluginRegistry
+import com.mobileforge.engine.ChangeLog
+import com.mobileforge.engine.FileChange
+import com.mobileforge.engine.ScriptInterpreter
+import com.mobileforge.plugins.PluginHost
+import com.mobileforge.plugins.PluginRecord
 import com.mobileforge.security.SecretStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
-enum class Section { Agent, Projects, Files, Studio, Assets, Play, Cloud, Mcp, Ai, Settings }
+enum class Section { Agent, Projects, Files, Studio, Assets, Play, Cloud, Mcp, Ai, Settings, Changes, Plugins }
 enum class AiCommand { Create, Change, Delete, Explain }
 
 data class ProjectItem(val name: String, val type: String)
@@ -136,6 +140,17 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     var streamTick by mutableStateOf(0)
     private var agentCancel = false
     private var lastDirectorTask = ""
+    private val pluginHost = PluginHost()
+    val pluginRecords = mutableStateListOf<PluginRecord>()
+    val pluginLog = mutableStateListOf<String>()
+    var pluginNewId by mutableStateOf("")
+    var pluginNewTitle by mutableStateOf("")
+    val changes = mutableStateListOf<FileChange>()
+    var selectedChange by mutableStateOf(0L)
+    val ideTabs = mutableStateListOf<String>()
+    var findQuery by mutableStateOf("")
+    val findHits = mutableStateListOf<String>()
+    val ideErrors = mutableStateListOf<String>()
     private val sessionStarted = System.currentTimeMillis()
     val sessionLimitMs = 6L * 60 * 60 * 1000
     fun sessionElapsedMs(): Long = System.currentTimeMillis() - sessionStarted
@@ -177,7 +192,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         provider = prefs.getString("ai_provider", "zen").orEmpty().ifBlank { "zen" }
         model = prefs.getString("${provider}_model", ModelCatalog.defaultId(provider))
             .orEmpty().ifBlank { ModelCatalog.defaultId(provider) }
-        log("MobileForge 2.6 — имя из приказа, свои ассеты, без самовольного джойстика")
+        log("MobileForge 2.7 — Unity + VS + diff + живые плагины")
     }
 
     fun notify(text: String) {
@@ -194,10 +209,13 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         section = next
         when (next) {
             Section.Projects -> refreshProjects()
-            Section.Files, Section.Studio, Section.Assets, Section.Ai -> {
+            Section.Files, Section.Studio, Section.Assets, Section.Ai, Section.Changes, Section.Plugins -> {
                 refreshFiles()
                 refreshScenes()
                 refreshPack()
+                if (next == Section.Plugins) reloadPlugins()
+                if (next == Section.Changes) reloadChanges()
+                if (next == Section.Ai) scanIdeErrors()
             }
             Section.Play -> {}
             Section.Settings -> refreshProviderFlags()
@@ -239,6 +257,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         refreshScenes()
         scene = scenes.firstOrNull()
         selected = scene?.objects?.firstOrNull()?.name
+        ideTabs.clear()
+        reloadPlugins()
+        reloadChanges()
+        firePlugin("onOpen")
         log("Проект открыт: $name")
         notify("Проект: $name")
         if (navigate) go(Section.Studio)
@@ -319,6 +341,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         editorText = file.readText()
         dirty = false
         suggestions.clear()
+        if (path !in ideTabs) ideTabs += path
+        scanIdeErrors()
         if (path.endsWith(".scene.json")) {
             runCatching {
                 scene = scenesStore.load(file)
@@ -350,12 +374,16 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun saveFile() {
         val project = current() ?: return notify("Нет проекта")
         val path = openPath ?: return notify("Нет открытого файла")
+        val before = runCatching { store.resolve(project, path).takeIf { it.isFile }?.readText() }.getOrNull().orEmpty()
         store.writeFile(project, path, editorText).fold(
             {
                 dirty = false
                 if (path.endsWith(".scene.json")) {
                     runCatching { scene = scenesStore.load(it.file) }
                 }
+                recordWrite(path, "вы", before, editorText)
+                firePlugin("onSave", extraPath = path)
+                scanIdeErrors()
                 notify("Сохранено: $path")
                 refreshFiles()
             },
@@ -373,7 +401,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             else -> "// $path\n"
         }
         store.createFile(project, path, seed).fold(
-            { openFile(path) },
+            {
+                recordWrite(path, "вы", "", seed)
+                openFile(path)
+            },
             { notify(it.message ?: "Не создан") },
         )
     }
@@ -381,8 +412,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun deleteOpenFile() {
         val project = current() ?: return
         val path = openPath ?: return
+        val beforeDel = runCatching { store.resolve(project, path).readText() }.getOrNull().orEmpty()
         store.deleteFile(project, path).fold(
             {
+                recordWrite(path, "вы", beforeDel, "")
+                ideTabs.remove(path)
                 openPath = null
                 editorText = ""
                 dirty = false
@@ -436,7 +470,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun persistScene(show: Boolean = false) {
         current(false) ?: return
         val currentScene = scene ?: return
+        val scenePath = "Scenes/${currentScene.name}.scene.json"
+        val sceneBefore = runCatching { currentScene.file.takeIf { it.isFile }?.readText() }.getOrNull().orEmpty()
         scenesStore.save(currentScene)
+        recordWrite(scenePath, "сцена", sceneBefore, currentScene.toJson().toString(2) + "\n")
         if (openPath == "Scenes/${currentScene.name}.scene.json") {
             editorText = currentScene.toJson().toString(2) + "\n"
             dirty = false
@@ -522,6 +559,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         )
         selected = name
         persistScene(true)
+        firePlugin("onAddObject", extraPath = name, extraType = type)
         log("Добавлен $type $name")
         return "added $name"
     }
@@ -549,6 +587,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }.getOrDefault(ControlLayout.EMPTY)
         runtime?.stop()
         runtime = GameRuntime(currentScene, scripts).also { it.start() }
+        firePlugin("onPlay")
         log(
             if (playControls.items.isEmpty()) {
                 "Play: сенсор не задан (AI может создать UI/Controls.json)"
@@ -841,7 +880,168 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun plugins() = PluginRegistry.bundled
+    fun plugins() = pluginRecords.map {
+        com.mobileforge.plugins.PluginInfo(it.id, it.title, it.summary, it.enabled)
+    }
+
+    fun reloadPlugins() {
+        pluginRecords.clear()
+        val p = current(false) ?: return
+        pluginRecords += pluginHost.reload(p)
+    }
+
+    fun createPlugin() = createPluginFromArgs(pluginNewId, pluginNewTitle)
+
+    fun createPluginFromArgs(id: String, title: String): String {
+        val p = current(false) ?: return "ERROR: no project"
+        val rec = pluginHost.create(p, id.ifBlank { "plugin" }, title.ifBlank { id })
+        reloadPlugins()
+        refreshFiles()
+        firePlugin("onInstall")
+        notify("Плагин ${rec.id}")
+        return "created plugin ${rec.id}"
+    }
+
+    fun togglePlugin(id: String) {
+        val p = current(false) ?: return
+        val rec = pluginRecords.find { it.id == id } ?: return
+        pluginHost.setEnabled(p, id, !rec.enabled)
+        reloadPlugins()
+    }
+
+    fun runPluginMenu(id: String, menu: String): String {
+        val rec = pluginRecords.find { it.id == id } ?: return "no plugin"
+        val fn = if (menu.startsWith("menu_")) menu else "menu_$menu"
+        val out = pluginHost.run(rec, fn, pluginEnv())
+        pluginLog.add(0, "$id.$fn → $out")
+        while (pluginLog.size > 40) pluginLog.removeAt(pluginLog.lastIndex)
+        refreshFiles()
+        return out
+    }
+
+    fun firePlugin(hook: String, extraPath: String = "", extraType: String = "") {
+        val p = current(false) ?: return
+        pluginRecords.filter { it.enabled && hook in it.hooks }.forEach { rec ->
+            val out = pluginHost.run(rec, hook, pluginEnv(extraPath, extraType))
+            if (out.isNotBlank() && out != "null") pluginLog.add(0, "${rec.id}.$hook → $out")
+        }
+        while (pluginLog.size > 40) pluginLog.removeAt(pluginLog.lastIndex)
+    }
+
+    private fun pluginEnv(extraPath: String = "", extraType: String = ""): MutableMap<String, ScriptInterpreter.Val> {
+        val api = ScriptInterpreter.Val.Obj(
+            get = { key ->
+                when (key) {
+                    "log" -> ScriptInterpreter.Val.Host { args ->
+                        log(args.getOrNull(0)?.str().orEmpty()); ScriptInterpreter.Val.Null
+                    }
+                    "notify" -> ScriptInterpreter.Val.Host { args ->
+                        notify(args.getOrNull(0)?.str().orEmpty()); ScriptInterpreter.Val.Null
+                    }
+                    "writeFile" -> ScriptInterpreter.Val.Host { args ->
+                        val path = args.getOrNull(0)?.str().orEmpty()
+                        val content = args.getOrNull(1)?.str().orEmpty()
+                        val proj = current(false)
+                        if (proj != null && path.isNotBlank()) {
+                            val before = runCatching { store.resolve(proj, path).takeIf { it.isFile }?.readText() }.getOrNull().orEmpty()
+                            store.writeFile(proj, path, content)
+                            recordWrite(path, "плагин", before, content)
+                        }
+                        ScriptInterpreter.Val.Null
+                    }
+                    "readFile" -> ScriptInterpreter.Val.Host { args ->
+                        val path = args.getOrNull(0)?.str().orEmpty()
+                        val proj = current(false)
+                        val text = if (proj != null) runCatching { store.resolve(proj, path).readText() }.getOrNull().orEmpty() else ""
+                        ScriptInterpreter.Val.Str(text)
+                    }
+                    "addObject" -> ScriptInterpreter.Val.Host { args ->
+                        addObject(args.getOrNull(0)?.str().orEmpty().ifBlank { "Mesh" })
+                        ScriptInterpreter.Val.Null
+                    }
+                    "path" -> ScriptInterpreter.Val.Str(extraPath.ifBlank { openPath.orEmpty() })
+                    "type" -> ScriptInterpreter.Val.Str(extraType)
+                    "name" -> ScriptInterpreter.Val.Str(extraPath.ifBlank { selected.orEmpty() })
+                    "project" -> ScriptInterpreter.Val.Str(projectName.orEmpty())
+                    "time" -> ScriptInterpreter.Val.Num(System.currentTimeMillis().toDouble())
+                    "selected" -> ScriptInterpreter.Val.Str(selected.orEmpty())
+                    else -> ScriptInterpreter.Val.Null
+                }
+            },
+            set = { _, _ -> },
+        )
+        return mutableMapOf("api" to api)
+    }
+
+    fun recordWrite(path: String, author: String, before: String, after: String) {
+        if (before == after) return
+        val ch = FileChange(System.nanoTime(), path, System.currentTimeMillis(), author, before, after)
+        changes.add(0, ch)
+        while (changes.size > 80) changes.removeAt(changes.lastIndex)
+        val p = current(false) ?: return
+        runCatching {
+            val f = java.io.File(p.directory, "Logs/changes.jsonl")
+            f.parentFile?.mkdirs()
+            f.appendText(ChangeLog.toJson(ch).toString() + "\n")
+        }
+    }
+
+    fun reloadChanges() {
+        changes.clear()
+        val p = current(false) ?: return
+        val f = java.io.File(p.directory, "Logs/changes.jsonl")
+        if (!f.isFile) return
+        f.readLines().asReversed().take(80).forEach { line ->
+            runCatching { changes += ChangeLog.fromJson(org.json.JSONObject(line)) }
+        }
+    }
+
+    fun clearChanges() {
+        changes.clear()
+        selectedChange = 0L
+        val p = current(false) ?: return
+        java.io.File(p.directory, "Logs/changes.jsonl").delete()
+    }
+
+    fun findInProject() {
+        findHits.clear()
+        val q = findQuery.trim()
+        if (q.isEmpty()) return
+        val p = current(false) ?: return
+        store.files(p).forEach { file ->
+            runCatching {
+                file.file.readLines().forEachIndexed { i, line ->
+                    if (q in line) findHits += "${file.relativePath}:${i + 1}: ${line.trim().take(80)}"
+                }
+            }
+        }
+        if (findHits.isEmpty()) findHits += "нет совпадений"
+    }
+
+    fun scanIdeErrors() {
+        ideErrors.clear()
+        val text = editorText
+        val path = openPath ?: return
+        var curly = 0
+        var round = 0
+        var square = 0
+        text.forEach { c ->
+            when (c) {
+                '{' -> curly++
+                '}' -> curly--
+                '(' -> round++
+                ')' -> round--
+                '[' -> square++
+                ']' -> square--
+            }
+        }
+        if (curly != 0) ideErrors += "$path: незакрытые { } ($curly)"
+        if (round != 0) ideErrors += "$path: незакрытые ( ) ($round)"
+        if (square != 0) ideErrors += "$path: незакрытые [ ] ($square)"
+        if (path.endsWith(".json") || path.endsWith(".scene.json")) {
+            runCatching { org.json.JSONObject(text) }.onFailure { ideErrors += "$path: JSON ${it.message}" }
+        }
+    }
 
     fun toggleCard(id: Long) {
         val i = agentCards.indexOfFirst { it.id == id }
@@ -1100,9 +1300,14 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             }
             "fs.write", "fs.create" -> {
                 val p = current(false) ?: error("no project")
-                store.writeFile(p, args.getString("path"), args.optString("content")).getOrThrow()
+                val path = args.getString("path")
+                val content = args.optString("content")
+                val before = runCatching { store.resolve(p, path).takeIf { it.isFile }?.readText() }.getOrNull().orEmpty()
+                store.writeFile(p, path, content).getOrThrow()
+                recordWrite(path, "агент", before, content)
+                firePlugin("onSave", extraPath = path)
                 refreshFiles()
-                "wrote ${args.getString("path")}"
+                "wrote $path"
             }
             "scene.create" -> {
                 createScene(args.optString("name", "Main"), args.optString("dimension", "3D"))
@@ -1128,6 +1333,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 startPlay()
                 "play"
             }
+            "plugin.create" -> {
+                createPluginFromArgs(args.optString("id"), args.optString("title"))
+            }
+            "plugin.list" -> pluginRecords.joinToString { it.id + (if (it.enabled) "" else " (off)") }.ifBlank { "(no plugins)" }
+            "plugin.run" -> runPluginMenu(args.optString("id"), args.optString("menu"))
             "say", "done" -> args.optString("say").ifBlank { "ok" }
             else -> error("unknown tool $tool")
         }

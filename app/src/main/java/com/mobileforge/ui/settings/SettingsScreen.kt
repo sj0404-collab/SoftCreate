@@ -57,10 +57,7 @@ fun SettingsScreen(vm: AppViewModel) {
             MfButton("Check MCP") { vm.checkMcp() }
         }
         Text("MCP: 127.0.0.1:8765 · полный workbench во вкладке MCP", color = MfMuted, fontSize = 13.sp)
-        Text("Плагины", color = MfMuted, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
-        vm.plugins().forEach { p ->
-            Text("• ${p.title}: ${p.summary}", color = MfMuted, fontSize = 12.sp)
-        }
+        Text("Плагины — вкладка Плагины (JS из Plugins/<id>/, не заглушки).", color = MfMuted, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
         Text(
             "Чип моделей: Zen free без ключа. OpenRouter :free и paid — ключ выше. Orca/Gemini — свои ключи. Ключи только в Keystore, не в APK.",
             color = MfMuted,

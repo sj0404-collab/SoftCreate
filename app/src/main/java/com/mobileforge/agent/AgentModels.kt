@@ -93,6 +93,9 @@ Tools:
 - asset.create {"kind":"sound","name":"Pickup","freq":880}
 - controls.set {"items":[...]}   ONLY if the director asked for touch/joystick/buttons
 - play.start {}
+- plugin.create {"id":"scorepad","title":"Score Pad"}
+- plugin.list {}
+- plugin.run {"id":"scorepad","menu":"ping"}
 
 Hard rules:
 - Use the project name from the user message EXACTLY. Never SkyArena / New2DGame / Demo unless they wrote that word.

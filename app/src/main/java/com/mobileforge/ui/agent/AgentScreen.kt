@@ -41,12 +41,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.platform.LocalConfiguration
+
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
-import android.content.res.Configuration
+
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.mobileforge.AppViewModel
@@ -61,9 +61,10 @@ import com.mobileforge.ui.mcp.McpScreen
 import com.mobileforge.ui.play.PlayScreen
 import com.mobileforge.ui.projects.ProjectsScreen
 import com.mobileforge.ui.settings.SettingsScreen
-import com.mobileforge.ui.studio.CodeScreen
+import com.mobileforge.ui.ide.ChangesScreen
+import com.mobileforge.ui.ide.VisualStudioScreen
+import com.mobileforge.ui.plugins.PluginsScreen
 import com.mobileforge.ui.studio.FilesScreen
-import com.mobileforge.ui.studio.SceneScreen
 import com.mobileforge.ui.unity.UnityWorkspace
 import kotlinx.coroutines.delay
 
@@ -141,11 +142,10 @@ fun AgentScreen(vm: AppViewModel) {
                 Section.Agent -> ChatPane(vm)
                 Section.Projects -> ProjectsScreen(vm)
                 Section.Files -> FilesScreen(vm)
-                Section.Studio -> {
-                    val land = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
-                    if (land) UnityWorkspace(vm) else SceneScreen(vm)
-                }
-                Section.Ai -> CodeScreen(vm)
+                Section.Studio -> UnityWorkspace(vm)
+                Section.Ai -> VisualStudioScreen(vm)
+                Section.Changes -> ChangesScreen(vm)
+                Section.Plugins -> PluginsScreen(vm)
                 Section.Assets -> AssetsScreen(vm)
                 Section.Play -> PlayScreen(vm)
                 Section.Cloud -> CloudScreen(vm)
