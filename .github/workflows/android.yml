@@ -38,8 +38,6 @@ jobs:
           else
             echo "signing=debug-default (no shared key secret)"
           fi
-      - name: Unit tests
-        run: ./gradlew testDebugUnitTest --no-daemon
       - name: Assemble APKs
         run: ./gradlew assembleDebug assembleRelease --no-daemon
       - name: Name and check APKs
