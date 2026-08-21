@@ -209,7 +209,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             openProject(lastProj, navigate = false)
         }
         installCrashGuard()
-        log("MobileForge 2.10 — вкладки без вылета, автосмена модели")
+        log("MobileForge 2.10.1 — живой текст стрима, шапка не ломается")
     }
 
 
@@ -1352,15 +1352,18 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     val accLock = Any()
                     var lastUi = 0L
                     var uiPosted = false
+                    var liveDone = false
+                    val paintLater = Runnable {
+                        uiPosted = false
+                        if (!liveDone) paintLive(true)
+                    }
                     fun paintLive(force: Boolean) {
+                        if (liveDone) return
                         val now = System.currentTimeMillis()
                         if (!force && now - lastUi < 90L) {
                             if (!uiPosted) {
                                 uiPosted = true
-                                main.postDelayed({
-                                    uiPosted = false
-                                    paintLive(true)
-                                }, 90L)
+                                main.postDelayed(paintLater, 90L)
                             }
                             return
                         }
@@ -1372,14 +1375,19 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                             thinkSnap = accThink.toString()
                         }
                         main.post {
+                            if (liveDone) return@post
                             val idx = agentFeed.indexOfFirst { it.id == liveId }
                             if (idx < 0) return@post
                             val cur = agentFeed[idx] as? AgentEvent.Assistant ?: return@post
-                            val cut = rawSnap.indexOf('{').let { if (it < 0) rawSnap.indexOf("<tool") else it }
+                            if (!cur.live) return@post
+                            val cutBrace = rawSnap.indexOf('{')
+                            val cutTool = rawSnap.indexOf("<tool")
+                            val cut = listOf(cutBrace, cutTool).filter { it >= 0 }.minOrNull() ?: -1
                             val prose = if (cut >= 0) rawSnap.take(cut).trim() else rawSnap.trim()
-                            val think = thinkSnap.ifBlank { prose }.takeLast(8000)
+                            val sayHit = Regex("\"say\"\\s*:\\s*\"([^\"]*)\"").find(rawSnap)?.groupValues?.get(1).orEmpty()
+                            val think = thinkSnap.ifBlank { prose }.ifBlank { sayHit }.takeLast(8000)
                             agentFeed[idx] = cur.copy(
-                                text = "",
+                                text = sayHit,
                                 thinking = think,
                                 raw = rawSnap,
                                 live = true,
@@ -1442,8 +1450,19 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                                     0,
                                     true,
                                 )
+                                liveDone = true
+                                main.removeCallbacks(paintLater)
+                                withContext(Dispatchers.Main) {
+                                    val idx = agentFeed.indexOfFirst { it.id == liveId }
+                                    val cur = if (idx >= 0) agentFeed[idx] as? AgentEvent.Assistant else null
+                                    if (idx >= 0 && cur != null && cur.live) {
+                                        agentFeed[idx] = cur.copy(live = false)
+                                    }
+                                }
                                 continue
                             }
+                            liveDone = true
+                            main.removeCallbacks(paintLater)
                             pushCard("ошибка", "error", "{}", StreamText.humanError(err ?: Exception("ошибка модели")), 0, false)
                             break
                         }
@@ -1459,6 +1478,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                         }
                     }
                     paintLive(true)
+                    liveDone = true
+                    main.removeCallbacks(paintLater)
                     val llmMs = System.currentTimeMillis() - llmStarted
                     agentLastLlmMs = llmMs
                     agentTokens += reply.promptTokens + reply.completionTokens
@@ -1598,7 +1619,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
         applyAssetsToScene(p, name, written)
         refreshFiles()
-        return "created ${written.joinToString()} — повесь material/mesh на объекты, иначе не видно"
+        return when {
+            written.any { it.endsWith(".wav") } && written.none { it.endsWith(".mat") } ->
+                "created ${written.joinToString()} — звук в Assets/Audio, play.start его подхватит"
+            else ->
+                "created ${written.joinToString()} — повесь material/mesh на объекты"
+        }
     }
 
     private fun applyAssetsToScene(p: ProjectStore.Project, name: String, written: List<String>) {

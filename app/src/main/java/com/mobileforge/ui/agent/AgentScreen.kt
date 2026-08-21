@@ -123,7 +123,10 @@ fun AgentScreen(vm: AppViewModel) {
                 IconBtn("■", active = vm.agentRunning) { vm.stopAgent() }
             }
             Spacer(Modifier.height(6.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                Modifier.horizontalScroll(rememberScrollState()),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 Box(Modifier.size(7.dp).clip(CircleShape).background(if (vm.agentRunning) Teal else Ok))
                 Spacer(Modifier.width(6.dp))
                 Text(vm.agentStatus, color = Ink, fontSize = 12.sp)
@@ -131,7 +134,7 @@ fun AgentScreen(vm: AppViewModel) {
                 Meta("инстр.", vm.agentToolsUsed.toString())
                 Meta("токены", vm.agentTokens.toString())
                 Text(" ${vm.agentElapsed}с", color = Mute, fontSize = 12.sp)
-                if (vm.agentLastLlmMs > 0) Meta("модель", Director.formatMs(vm.agentLastLlmMs))
+                if (vm.agentLastLlmMs > 0) Meta("llm", Director.formatMs(vm.agentLastLlmMs))
                 if (vm.agentLastToolMs > 0) Meta("тул", Director.formatMs(vm.agentLastToolMs))
             }
             Text(
@@ -290,14 +293,12 @@ private fun AssistantBubble(ev: AgentEvent.Assistant, onCopy: () -> Unit, onRese
             Text("размышление", color = Think, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp))
             Text(think, color = Think, fontSize = 13.sp, lineHeight = 18.sp)
             Spacer(Modifier.height(8.dp))
-        } else if (ev.live) {
-            Text("размышляет…", color = Think, fontSize = 13.sp, modifier = Modifier.padding(top = 4.dp))
         }
         if (body.isNotBlank()) {
             Text("делаю", color = Teal, fontSize = 11.sp)
             Text(body, color = Ink, fontSize = 15.sp, lineHeight = 22.sp)
-        } else if (ev.live && think.isBlank()) {
-            Text("печатает…", color = Mute, fontSize = 13.sp)
+        } else if (ev.live) {
+            Text("думает…", color = Mute, fontSize = 13.sp, modifier = Modifier.padding(top = 4.dp))
         }
         Row(
             Modifier.padding(top = 8.dp),
