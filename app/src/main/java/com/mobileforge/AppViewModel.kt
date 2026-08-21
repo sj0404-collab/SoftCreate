@@ -1353,10 +1353,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     var lastUi = 0L
                     var uiPosted = false
                     var liveDone = false
-                    val paintLater = Runnable {
-                        uiPosted = false
-                        if (!liveDone) paintLive(true)
-                    }
+                    var paintLater: Runnable = Runnable { }
                     fun paintLive(force: Boolean) {
                         if (liveDone) return
                         val now = System.currentTimeMillis()
@@ -1393,6 +1390,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                                 live = true,
                             )
                         }
+                    }
+                    paintLater = Runnable {
+                        uiPosted = false
+                        if (!liveDone) paintLive(true)
                     }
                     val streamed = withContext(Dispatchers.IO) {
                         ai.converseStream(
