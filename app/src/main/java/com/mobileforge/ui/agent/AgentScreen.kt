@@ -298,7 +298,12 @@ private fun AssistantBubble(ev: AgentEvent.Assistant, onCopy: () -> Unit, onRese
             Text("делаю", color = Teal, fontSize = 11.sp)
             Text(body, color = Ink, fontSize = 15.sp, lineHeight = 22.sp)
         } else if (ev.live) {
-            Text("думает…", color = Mute, fontSize = 13.sp, modifier = Modifier.padding(top = 4.dp))
+            val hint = when {
+                ev.raw.contains("{") || "<tool" in ev.raw -> "пишет вызов…"
+                ev.thinking.isNotBlank() -> ""
+                else -> "думает…"
+            }
+            if (hint.isNotBlank()) Text(hint, color = Mute, fontSize = 13.sp, modifier = Modifier.padding(top = 4.dp))
         }
         Row(
             Modifier.padding(top = 8.dp),

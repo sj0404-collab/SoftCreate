@@ -1342,6 +1342,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     agentElapsed = ((System.currentTimeMillis() - started) / 1000).toInt()
                     val liveId = System.nanoTime()
                     withContext(Dispatchers.Main) {
+                        agentFeed.indices.forEach { i ->
+                            val ev = agentFeed[i]
+                            if (ev is AgentEvent.Assistant && ev.live) {
+                                agentFeed[i] = ev.copy(live = false)
+                            }
+                        }
                         agentFeed += AgentEvent.Assistant(liveId, "", "", live = true)
                         streamTick++
                     }
