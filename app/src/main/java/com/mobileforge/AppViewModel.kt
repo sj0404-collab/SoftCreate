@@ -212,7 +212,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         reloadUserModels()
     }
 
-    fun setRepoOnly(on: Boolean) {
+    fun toggleRepoOnly(on: Boolean) {
         repoOnly = on
         prefs.edit().putBoolean("repo_only", on).apply()
     }

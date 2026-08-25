@@ -67,7 +67,7 @@ fun SettingsScreen(vm: AppViewModel) {
         )
         Text("Репо и модели", color = MfText, fontSize = 15.sp)
         MfButton(if (vm.repoOnly) "Писать только в GitHub-репо" else "Локальный проект + GitHub") {
-            vm.setRepoOnly(!vm.repoOnly)
+            vm.toggleRepoOnly(!vm.repoOnly)
         }
         MfField(vm.newModelId, { vm.newModelId = it }, "id модели (mimo-v2.5-free)")
         MfField(vm.newModelLabel, { vm.newModelLabel = it }, "подпись")
