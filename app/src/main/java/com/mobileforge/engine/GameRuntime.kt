@@ -20,6 +20,7 @@ class Actor(src: SceneObject) {
     var script: String = src.script
     var solid: Boolean = src.solid
     var speed: Float = src.speed
+    var mesh: String = src.mesh
     var extra: org.json.JSONObject = org.json.JSONObject(src.extra.toString())
     var parent: String = src.parent
     var tag: String = src.tag

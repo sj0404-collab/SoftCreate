@@ -1916,34 +1916,3 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         """.trimIndent()
     }
 }
- a code-only agent for MobileForge. The human is the director.
-            Do not invent gameplay, art direction or architecture beyond the order.
-            Write only code. Return complete files in fenced blocks with paths, e.g. ```Scripts/Player.cs
-            There is NO default on-screen touch UI. If the director asks for controls/joystick/buttons/HUD,
-            create UI/Controls.json:
-            {"format":"mobileforge.controls.v1","items":[{"type":"joystick","anchor":"bl","action":"move"},{"type":"button","anchor":"br","label":"Jump","action":"jump"}]}
-            Do not add touch controls unless explicitly asked.
-            Command type: ${aiCommand.name}
-            Preferred language: $aiLanguage (.cs first)
-            Event hook if relevant: $aiEvent
-            Project: ${projectName ?: "none"}
-            $sceneCtx
-            $fileCtx
-            ORDER FROM DIRECTOR:
-            $aiTask
-        """.trimIndent()
-    }
-}
-eforge.controls.v1","items":[{"type":"joystick","anchor":"bl","action":"move"},{"type":"button","anchor":"br","label":"Jump","action":"jump"}]}
-            Do not add touch controls unless explicitly asked.
-            Command type: ${aiCommand.name}
-            Preferred language: $aiLanguage (.cs first)
-            Event hook if relevant: $aiEvent
-            Project: ${projectName ?: "none"}
-            $sceneCtx
-            $fileCtx
-            ORDER FROM DIRECTOR:
-            $aiTask
-        """.trimIndent()
-    }
-}
