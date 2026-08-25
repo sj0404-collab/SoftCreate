@@ -122,9 +122,78 @@ class GameRuntime(
         runCatching { script.call(event, env) }.onFailure { log("$event ${actor.name}: ${it.message}") }
     }
 
+    private fun eachComp(actor: Actor, type: String, fn: (org.json.JSONObject) -> Unit) {
+        val arr = actor.extra.optJSONArray("components") ?: return
+        val want = EngineKit.alias(type)
+        for (i in 0 until arr.length()) {
+            val o = arr.optJSONObject(i) ?: continue
+            if (o.optBoolean("enabled", true) && EngineKit.alias(o.optString("type")) == want) fn(o)
+        }
+    }
+
+    private fun applyComponents(actor: Actor, dt: Float) {
+        eachComp(actor, "Rigidbody") { c ->
+            if (c.optBoolean("useGravity", true)) actor.vy -= gravity * dt
+            val drag = c.optDouble("drag", 0.05).toFloat()
+            actor.vx *= (1f - drag)
+            actor.vz *= (1f - drag)
+        }
+        eachComp(actor, "Animator") { c ->
+            if (!c.optBoolean("playing", true)) return@eachComp
+            val spd = c.optDouble("speed", 1.0).toFloat()
+            when (c.optString("clip", "spin")) {
+                "spin" -> actor.ry += 90f * spd * dt
+                "bob" -> actor.y += (kotlin.math.sin(elapsed * 4.0 * spd) * 0.01).toFloat()
+                else -> actor.ry += 45f * spd * dt
+            }
+        }
+        eachComp(actor, "CharacterController") { c ->
+            val speed = c.optDouble("speed", if (actor.speed == 0f) 6.0 else actor.speed.toDouble()).toFloat()
+            actor.x += input.x * speed * dt
+            if (dimension.equals("2D", true)) actor.y += input.y * speed * dt
+            else actor.z += -input.y * speed * dt
+            if (input.jump && actor.y <= groundY(actor) + 0.08f) actor.vy = c.optDouble("jump", 7.0).toFloat()
+        }
+        eachComp(actor, "NavMeshAgent") { c ->
+            val target = c.optString("target")
+            val dest = actors.find { it.alive && (it.name == target || it.tag == target) } ?: return@eachComp
+            val spd = c.optDouble("speed", 4.0).toFloat()
+            val dx = dest.x - actor.x
+            val dz = dest.z - actor.z
+            val len = kotlin.math.sqrt(dx * dx + dz * dz)
+            if (len > 0.15f) {
+                actor.x += dx / len * spd * dt
+                actor.z += dz / len * spd * dt
+            }
+        }
+        eachComp(actor, "Projectile") { c ->
+            val spd = c.optDouble("speed", 12.0).toFloat()
+            val yaw = Math.toRadians(actor.ry.toDouble())
+            actor.x += (kotlin.math.sin(yaw) * spd * dt).toFloat()
+            actor.z += (kotlin.math.cos(yaw) * spd * dt).toFloat()
+            val life = c.optDouble("life", 3.0) - dt
+            c.put("life", life)
+            if (life <= 0) actor.alive = false
+        }
+        eachComp(actor, "ParticleSystem") { c ->
+            if (actor.particles.size < c.optInt("count", 8)) {
+                actor.particles += Particle(actor.x, actor.y + 0.4f, actor.z, 0f, 1.2f, 0f, 0.5f, c.optString("color", "#ffcc66"))
+            }
+            actor.particles.forEach { p -> p.y += p.vy * dt; p.life -= dt }
+            actor.particles.removeAll { it.life <= 0f }
+        }
+        eachComp(actor, "AudioSource") { c ->
+            if (c.optBoolean("playOnAwake") && !c.optBoolean("_played")) {
+                onSound?.invoke(c.optString("clip")); c.put("_played", true)
+            }
+        }
+    }
+
     private fun integrate(actor: Actor, dt: Float) {
-        if (actor.type != "Player" && actor.type != "Enemy") return
-        val g = if (dimension.equals("2D", true)) 18f else 16f
+        val body = hasComponent(actor.extra, "Rigidbody") ||
+            actor.type in listOf("Player", "Enemy", "Pawn", "Character", "Npc")
+        if (!body) return
+        val g = gravity
         actor.vy -= g * dt
         if (!actor.x.isFinite()) actor.x = 0f
         if (!actor.y.isFinite()) actor.y = 1f
