@@ -34,6 +34,7 @@ data class SceneObject(
     var mass: Float = 1f,
     var plugin: String = "",
     var prefab: String = "",
+    var parent: String = "",
 ) {
     fun toJson(): JSONObject = JSONObject()
         .put("name", name)
@@ -65,6 +66,7 @@ data class SceneObject(
         .put("mass", mass.toDouble())
         .put("plugin", plugin)
         .put("prefab", prefab)
+        .put("parent", parent)
         .put("extra", extra)
 
     companion object {
@@ -73,6 +75,8 @@ data class SceneObject(
         val TYPES = listOf(
             "Camera", "Player", "Mesh", "Sprite", "Ground", "Light",
             "Coin", "Enemy", "Empty", "Button", "Block", "Prefab",
+            "Npc", "Particle", "Canvas", "Terrain", "Trigger", "Pawn",
+            "Character", "Rigidbody", "Audio", "Nav",
         )
 
         private fun num(json: JSONObject, key: String, def: Double): Float {
@@ -129,14 +133,24 @@ data class GameScene(
     var dimension: String,
     val objects: MutableList<SceneObject>,
     val file: File,
+    var gravity: Float = 16f,
+    var skyTop: String = "#15202B",
+    var skyBottom: String = "#0B0D14",
+    var ambient: Float = 0.35f,
+    var timeScale: Float = 1f,
 ) {
     fun toJson(): JSONObject {
         val items = org.json.JSONArray()
         objects.forEach { items.put(it.toJson()) }
         return JSONObject()
-            .put("format", "mobileforge.scene.v1")
+            .put("format", "mobileforge.scene.v2")
             .put("name", name)
             .put("dimension", dimension)
+            .put("gravity", gravity.toDouble())
+            .put("skyTop", skyTop)
+            .put("skyBottom", skyBottom)
+            .put("ambient", ambient.toDouble())
+            .put("timeScale", timeScale.toDouble())
             .put("objects", items)
     }
 }

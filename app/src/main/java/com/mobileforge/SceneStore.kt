@@ -71,6 +71,11 @@ class SceneStore {
             dimension = data.optString("dimension", "2D"),
             objects = CopyOnWriteArrayList(objects),
             file = file,
+            gravity = data.optDouble("gravity", 16.0).toFloat(),
+            skyTop = data.optString("skyTop", "#15202B"),
+            skyBottom = data.optString("skyBottom", "#0B0D14"),
+            ambient = data.optDouble("ambient", 0.35).toFloat(),
+            timeScale = data.optDouble("timeScale", 1.0).toFloat(),
         )
     } catch (_: Exception) {
         null

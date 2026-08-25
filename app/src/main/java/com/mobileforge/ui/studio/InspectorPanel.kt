@@ -57,5 +57,10 @@ fun InspectorPanel(vm: AppViewModel, modifier: Modifier = Modifier) {
         MfField(obj.layer, { vm.updateSelected { o -> o.layer = it } }, "layer")
         MfButton(if (obj.solid) "Solid: ON" else "Solid: OFF") { vm.updateSelected { o -> o.solid = !o.solid } }
         MfButton(if (obj.enabled) "Enabled: ON" else "Enabled: OFF") { vm.updateSelected { o -> o.enabled = !o.enabled } }
+        MfField(obj.parent, { vm.updateSelected { o -> o.parent = it } }, "parent")
+        Text("Компоненты", color = MfMuted, fontSize = 11.sp)
+        listOf("Rigidbody", "CharacterController", "Animator", "ParticleSystem", "NavMeshAgent", "AudioSource").forEach { t ->
+            MfButton("+ $t") { vm.addComponentToSelected(t) }
+        }
     }
 }

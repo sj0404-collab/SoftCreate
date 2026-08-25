@@ -1,35 +1,10 @@
-# MobileForge 2.9
+# MobileForge 2.13
 
-Вертикально — AI и код. Горизонтально — панели Unity (Hierarchy / Scene / Inspector / Project / Console) с живыми данными.
+Рантайм Unity / Godot / Unreal на одном движке: компоненты реально тикают в Play.
 
-Сенсорного управления по умолчанию нет: стик и кнопки появляются только если AI (по вашей команде) создаст `UI/Controls.json`.
+- Rigidbody / CharacterController / Animator / ParticleSystem / NavMeshAgent / AudioSource / Projectile
+- Алиасы Godot и Unreal (RigidBody3D, CharacterBody3D, Niagara, Pawn…)
+- Префабы, parent, timeScale, гравитация
+- Выбранная модель не подменяется другой семьёй
 
-Сборка APK — **только GitHub Actions runner**.
-
-Вы режиссёр: инспектор, ассеты, камера, свет, блоки, модели, `.cs`. Нейросеть **пишет только код** и ничего не применяет без вашей кнопки Apply.
-
-## На телефоне
-
-- Иерархия + сцена + инспектор (transform, mesh, material, light, camera, tag/layer, script)
-- Asset Database: Scripts, Models, Materials, Prefabs, StudioPack
-- Play-preview локально (без компиляции APK на девайсе)
-- Cloud: несколько GitHub PAT/аккаунтов, список репо, создание репо, push проекта, `workflow_dispatch`
-- MCP Workbench: локальные professional tools + HTTPS/localhost серверы
-- AI: Create / Change / Delete / Explain → Review → Apply
-- Модели: Zen free (без ключа), OpenRouter :free и paid, Orca, Gemini. Ключи только в Keystore.
-
-## На runner
-
-`./gradlew assembleDebug` генерирует `StudioPack` (~60–90 MB текстур/heightmaps/аудио) и пакует APK 50–100 MB.
-
-```
-workflow_dispatch / push main → artifact MobileForge-2.6.0-debug
-```
-
-## Безопасность
-
-PAT хранятся в Android Keystore. В репозиторий токены не коммитятся.
-
-## Лицензия
-
-MIT
+APK собирает GitHub Actions.

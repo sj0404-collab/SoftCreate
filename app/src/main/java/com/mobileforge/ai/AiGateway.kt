@@ -66,7 +66,7 @@ class AiGateway(private val secrets: SecretStore) {
         val queue = if (preferred == "auto" || preferred.isBlank()) {
             ModelCatalog.zenFreeIds()
         } else {
-            (listOf(ModelCatalog.remap(Provider.ZEN_DIRECT, preferred)) + ModelCatalog.zenFreeIds()).distinct()
+            listOf(preferred)
         }
         var last: Exception? = null
         for (candidate in queue) {

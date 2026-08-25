@@ -146,20 +146,17 @@ object ModelCatalog {
             out.add(provider to id)
         }
 
-        if (model != "auto") add(preferred, remap(preferred, model))
-
+        if (model != "auto" && model.isNotBlank()) {
+            add(preferred, model)
+            return out.toList()
+        }
         fun addFree(provider: Provider, limit: Int) {
             all.filter { toProvider(it.providerId) == provider && it.free && it.id != "auto" }
                 .take(limit)
                 .forEach { add(provider, it.id) }
         }
-
         addFree(preferred, 5)
-        if (hasKey(Provider.OPENROUTER) && preferred != Provider.OPENROUTER) addFree(Provider.OPENROUTER, 3)
-        if (hasKey(Provider.ORCA) && preferred != Provider.ORCA) addFree(Provider.ORCA, 2)
-        if (hasKey(Provider.GEMINI) && preferred != Provider.GEMINI) addFree(Provider.GEMINI, 2)
-        if (preferred != Provider.ZEN_DIRECT) addFree(Provider.ZEN_DIRECT, 4)
-        return out.toList().take(8)
+        return out.toList().take(6)
     }
 
     fun zenFreeIds(): List<String> =

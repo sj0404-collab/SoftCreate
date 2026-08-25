@@ -20,13 +20,18 @@ class Actor(src: SceneObject) {
     var script: String = src.script
     var solid: Boolean = src.solid
     var speed: Float = src.speed
+    var extra: org.json.JSONObject = org.json.JSONObject(src.extra.toString())
+    var parent: String = src.parent
+    var tag: String = src.tag
     var vx: Float = 0f
     var vy: Float = 0f
     var vz: Float = 0f
-    var alive: Boolean = true
+    var alive: Boolean = src.enabled
+    val particles = mutableListOf<Particle>()
 
     fun snapshot(): SceneObject = SceneObject(
-        name, type, x, y, z, rx, ry, rz, sx, sy, sz, "", script, color, solid, speed,
+        name, type, x, y, z, rx, ry, rz, sx, sy, sz, "", script, color, solid, speed, extra,
+        "Cube", "", "Directional", 1f, 60f, 0.3f, 200f, tag, "Default", alive, 1f, "", "", parent,
     )
 }
 
@@ -42,13 +47,17 @@ class GameRuntime(
     scripts: Map<String, String>,
     private val onLoadScene: ((String) -> Unit)? = null,
     private val onSound: ((String) -> Unit)? = null,
+    private val prefabs: Map<String, String> = emptyMap(),
 ) {
     var dimension: String = source.dimension
     val actors = source.objects.map { Actor(it) }.toMutableList()
     val input = InputState()
     val log = ArrayDeque<String>()
+    val signals = SignalBus()
     var score: Int = 0
     var elapsed: Float = 0f
+    var timeScale: Float = source.timeScale.coerceIn(0f, 8f)
+    var gravity: Float = source.gravity
     var playing: Boolean = false
         private set
 
@@ -79,10 +88,11 @@ class GameRuntime(
 
     fun step(dt: Float) {
         if (!playing) return
-        val clamped = dt.coerceIn(0.001f, 0.05f)
+        val clamped = (dt * timeScale).coerceIn(0.0001f, 0.05f)
         elapsed += clamped
         actors.filter { it.alive }.forEach { actor ->
             call(actor, "onUpdate", clamped)
+            applyComponents(actor, clamped)
             applyBuiltinUpdate(actor, clamped)
             integrate(actor, clamped)
         }
@@ -167,7 +177,7 @@ class GameRuntime(
     private fun applyBuiltinUpdate(actor: Actor, dt: Float) {
         if (compiled.containsKey(actor.name)) return
         when (actor.type) {
-            "Player" -> {
+            "Player", "Pawn", "Character" -> {
                 val speed = if (actor.speed == 0f) 6f else actor.speed
                 actor.x += input.x * speed * dt
                 if (dimension.equals("2D", true)) {
@@ -273,6 +283,37 @@ class GameRuntime(
                     "loadScene" -> ScriptInterpreter.Val.Host { args ->
                         onLoadScene?.invoke(args.getOrNull(0)?.str().orEmpty())
                         ScriptInterpreter.Val.Null
+                    }
+                    "addForce", "AddForce" -> ScriptInterpreter.Val.Host { args ->
+                        actor.vx += args.getOrNull(0)?.num()?.toFloat() ?: 0f
+                        actor.vy += args.getOrNull(1)?.num()?.toFloat() ?: 0f
+                        actor.vz += args.getOrNull(2)?.num()?.toFloat() ?: 0f
+                        ScriptInterpreter.Val.Null
+                    }
+                    "instantiate", "Instantiate" -> ScriptInterpreter.Val.Host { args ->
+                        val p = args.getOrNull(0)?.str().orEmpty()
+                        val raw = prefabs[p]
+                        val src = if (!raw.isNullOrBlank()) runCatching { SceneObject.fromJson(org.json.JSONObject(raw)) }.getOrNull() else null
+                        val base = src ?: SceneObject(p.ifBlank { "Spawn" }, "Mesh", actor.x, actor.y, actor.z)
+                        var n = base.name
+                        if (actors.any { it.name == n }) n = "${n}_${actors.size}"
+                        val copy = Actor(base)
+                        copy.name = n
+                        copy.x = args.getOrNull(1)?.num()?.toFloat() ?: actor.x
+                        copy.y = args.getOrNull(2)?.num()?.toFloat() ?: actor.y
+                        copy.z = args.getOrNull(3)?.num()?.toFloat() ?: actor.z
+                        actors += copy
+                        actorVal(copy)
+                    }
+                    "getComponent" -> ScriptInterpreter.Val.Host { args ->
+                        ScriptInterpreter.Val.Bool(hasComponent(actor.extra, args.getOrNull(0)?.str().orEmpty()))
+                    }
+                    "addComponent" -> ScriptInterpreter.Val.Host { args ->
+                        addComponent(actor.extra, args.getOrNull(0)?.str().orEmpty())
+                        ScriptInterpreter.Val.Null
+                    }
+                    "emit" -> ScriptInterpreter.Val.Host { args ->
+                        signals.emit(args.getOrNull(0)?.str().orEmpty()); ScriptInterpreter.Val.Null
                     }
                     "spawn" -> ScriptInterpreter.Val.Host { ScriptInterpreter.Val.Null }
                     else -> ScriptInterpreter.Val.Null

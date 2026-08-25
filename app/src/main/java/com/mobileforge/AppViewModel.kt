@@ -610,7 +610,24 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         persistScene(false)
     }
 
+    fun addComponentToSelected(type: String) {
+        val obj = selectedObject() ?: return notify("Нет объекта")
+        com.mobileforge.engine.addComponent(obj.extra, type)
+        persistScene(true)
+        notify("+ $type")
+    }
+
+    fun savePrefab(name: String): String {
+        val p = current(false) ?: return "ERROR: no project"
+        val obj = scene?.objects?.firstOrNull { it.name == name } ?: return "ERROR: нет $name"
+        val path = "Assets/Prefabs/${obj.name}.json"
+        store.writeFile(p, path, obj.toJson().toString(2)).getOrThrow()
+        refreshFiles()
+        return "prefab $path"
+    }
+
     fun addObject(type: String) {
+
         addObjectFromArgs(org.json.JSONObject().put("type", type))
     }
 
@@ -725,10 +742,15 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         runtime?.stop()
         val bank = soundBank ?: SoundBank(getApplication()).also { soundBank = it }
         val wavs = runCatching { bank.loadFrom(project.directory) }.getOrDefault(emptyList())
+        val prefabs = HashMap<String, String>()
+        store.files(project).filter { it.relativePath.startsWith("Assets/Prefabs/") }.forEach { f ->
+            runCatching { prefabs[f.file.nameWithoutExtension] = f.file.readText() }
+        }
         runtime = GameRuntime(
             currentScene,
             scripts,
             onSound = { name -> runCatching { bank.play(name) } },
+            prefabs = prefabs,
         ).also { it.start() }
         runCatching { firePlugin("onPlay") }
         log(
@@ -1447,15 +1469,14 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                                     else -> false
                                 }
                             }.firstOrNull { it.second != model }
-                            if (nxt != null) {
-                                setRoute(ModelCatalog.idOf(nxt.first), nxt.second)
+                            if (false && nxt != null) {
                                 pushCard(
                                     "модель",
-                                    "fallback",
+                                    "pin",
                                     "{}",
-                                    StreamText.humanError(err ?: Exception("ошибка модели")) + " → " + ModelCatalog.pretty(nxt.second) + ". Продолжаю заказ.",
+                                    StreamText.humanError(err ?: Exception("ошибка модели")) + " — выбранную модель не меняю.",
                                     0,
-                                    true,
+                                    false,
                                 )
                                 liveDone = true
                                 main.removeCallbacks(paintLater)
@@ -1479,9 +1500,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                         val nextProv = reply.provider.ifBlank { provider }.let {
                             if (it == "zen_direct" || it == "zendirect") "zen" else it
                         }
-                        if (nextProv != provider || (reply.model.isNotBlank() && reply.model != model)) {
-                            setRoute(nextProv, reply.model.ifBlank { model })
-                            pushCard("модель", "fallback", "{}", "переключил на ${ModelCatalog.pretty(model)} · $nextProv", 0, true)
+                        if (reply.model.isNotBlank() && reply.model != model) {
+                            pushCard("модель", "pin", "{}", "ответ как ${reply.model}, оставляю выбранную $model", 0, true)
                         }
                     }
                     paintLive(true)
@@ -1741,6 +1761,30 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             }
             "plugin.list" -> pluginRecords.joinToString { it.id + (if (it.enabled) "" else " (off)") }.ifBlank { "(no plugins)" }
             "plugin.run" -> runPluginMenu(args.optString("id"), args.optString("menu"))
+            "component.add", "scene.add_component" -> {
+                val n = args.optString("name").ifBlank { selected.orEmpty() }
+                val obj = scene?.objects?.firstOrNull { it.name == n } ?: error("нет объекта $n")
+                com.mobileforge.engine.addComponent(obj.extra, args.optString("type").ifBlank { args.optString("component") }, args)
+                persistScene(true)
+                "added component → $n"
+            }
+            "component.list" -> com.mobileforge.engine.EngineKit.allTypes().joinToString()
+            "prefab.save" -> savePrefab(args.optString("name").ifBlank { selected.orEmpty() })
+            "prefab.spawn" -> {
+                val p = current(false) ?: error("no project")
+                val name = args.optString("name")
+                val file = store.resolve(p, "Assets/Prefabs/$name.json")
+                if (!file.isFile) error("нет префаба $name")
+                val obj = com.mobileforge.SceneObject.fromJson(org.json.JSONObject(file.readText()))
+                obj.x = args.optDouble("x", obj.x.toDouble()).toFloat()
+                obj.y = args.optDouble("y", obj.y.toDouble()).toFloat()
+                obj.z = args.optDouble("z", obj.z.toDouble()).toFloat()
+                val sc = scene ?: error("no scene")
+                if (sc.objects.any { it.name == obj.name }) obj.name = obj.name + "_" + sc.objects.size
+                sc.objects += obj
+                persistScene(true)
+                "spawned ${obj.name}"
+            }
             "say", "done" -> args.optString("say").ifBlank { "ok" }
             else -> error("unknown tool $tool")
         }
