@@ -12,8 +12,8 @@ android {
         applicationId = "com.mobileforge"
         minSdk = 26
         targetSdk = 35
-        versionCode = 41
-        versionName = "2.13.0"
+        versionCode = 42
+        versionName = "2.14.0"
     }
 
     val sharedKs = System.getenv("ANDROID_KEYSTORE_PATH")

@@ -100,12 +100,19 @@ class GameRuntime(
         actors.removeAll { !it.alive }
     }
 
-    fun sceneSnapshot(): GameScene = GameScene(
-        name = "play",
-        dimension = dimension,
-        objects = actors.filter { it.alive }.map { it.snapshot() }.toMutableList(),
-        file = java.io.File("play"),
-    )
+    fun sceneSnapshot(): GameScene {
+        val objs = actors.filter { it.alive }.map { it.snapshot() }.toMutableList()
+        actors.filter { it.alive }.forEach { a ->
+            a.particles.forEachIndexed { i, p ->
+                objs += SceneObject(
+                    name = "${a.name}_fx$i", type = "Particle",
+                    x = p.x, y = p.y, z = p.z, sx = 0.18f, sy = 0.18f, sz = 0.18f,
+                    color = p.color, solid = false, mesh = "Sphere",
+                )
+            }
+        }
+        return GameScene("play", dimension, objs, java.io.File("play"))
+    }
 
     private fun fire(event: String) {
         actors.filter { it.alive }.forEach { call(it, event, 0f) }
@@ -207,14 +214,24 @@ class GameRuntime(
     }
 
     private fun groundY(actor: Actor): Float {
-        if (!dimension.equals("2D", true)) return 1f
-        var y = -8f
-        actors.filter { it.alive && (it.type == "Ground" || it.type == "Sprite") }.forEach { g ->
-            if (abs(actor.x - g.x) < (abs(g.sx) + abs(actor.sx)) * 0.6f) {
+        var y = if (dimension.equals("2D", true)) -8f else 0f
+        var hit = false
+        actors.filter {
+            it.alive && it.name != actor.name &&
+                (it.type == "Ground" || it.type == "Terrain" || it.mesh.equals("Plane", true))
+        }.forEach { g ->
+            val on = if (dimension.equals("2D", true)) {
+                abs(actor.x - g.x) < (abs(g.sx) + abs(actor.sx)) * 0.6f
+            } else {
+                abs(actor.x - g.x) < (abs(g.sx) + abs(actor.sx)) * 0.55f &&
+                    abs(actor.z - g.z) < (abs(g.sz) + abs(actor.sz)) * 0.55f
+            }
+            if (on) {
+                hit = true
                 y = maxOf(y, g.y + abs(g.sy) * 0.5f + abs(actor.sy) * 0.5f)
             }
         }
-        return y
+        return if (hit) y else if (dimension.equals("2D", true)) -8f else 0f
     }
 
     private fun aabb(a: Actor, b: Actor): Boolean =

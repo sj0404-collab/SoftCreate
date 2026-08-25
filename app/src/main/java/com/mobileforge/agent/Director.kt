@@ -103,6 +103,19 @@ object Director {
         return worldHints.any { it in low }
     }
 
+    enum class Kind { Follow, Github, Studio, Game, App }
+
+    fun classify(task: String): Kind {
+        if (isFollowUp(task)) return Kind.Follow
+        val low = " ${task.lowercase()} "
+        if (listOf("github", "гитхаб", "репозитор", "clone", "пуш", "push ", "commit", "коммит").any { it in low }) {
+            return Kind.Github
+        }
+        if (listOf("модул", "плагин", "инспектор", "интерфейс студ").any { it in low }) return Kind.Studio
+        if (wantsWorld(task) || "игр" in low || "game" in low) return Kind.Game
+        return Kind.App
+    }
+
     fun wants2D(task: String): Boolean {
         val low = task.lowercase().replace(" ", "")
         if (Regex("(?<![a-zа-я0-9])3d(?![a-zа-я0-9])").containsMatchIn(task.lowercase())) {

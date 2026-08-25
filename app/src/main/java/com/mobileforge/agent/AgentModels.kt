@@ -202,8 +202,17 @@ object AgentParser {
 - project.path {}
 - project.seed_demo {}
 - fs.list {}
-- fs.read {"path":"Scripts/Player.js"}
-- fs.write {"path":"Scripts/Player.js","content":"..."}
+- fs.read {"path":"Scripts/Player.cs"}
+- fs.write {"path":"Scripts/Player.cs","content":"..."}
+- github.whoami {}
+- github.repos {}
+- github.bind {"repo":"owner/name"}
+- github.ls {"path":""}
+- github.read {"path":"README.md"}
+- github.write {"path":"file.cs","content":"...","message":"fix"}
+- component.add {"name":"Герой","type":"Rigidbody"}
+- prefab.save {"name":"Герой"}
+- prefab.spawn {"name":"Герой","x":2}
 - scene.create {"name":"Main","dimension":"3D"}
 - scene.list {}
 - scene.add_object {"type":"Ground","name":"Лес","color":"#1f5c3a","mesh":"Plane","sx":40,"sz":40,"x":-30}
@@ -231,7 +240,7 @@ object AgentParser {
 - Если просили просторный мир и N биомов — N больших Plane со сдвигом по X/Z, разные цвета/имена, плюс жители.
 - Анимации — только если просили (слово «анимации» в заказе = просили: сделай через скрипт api, без твинов движка если нет инструмента).
 - Джойстик/HUD — только если просили.
-- Скрипты: JS api.move / api.jump / api.input / api.addScore. Пиши Scripts/Player.js. Не C# UnityEngine — здесь это не работает.
+- Скрипты: JS api.move / api.jump / api.input / api.addScore. Пиши Scripts/Player.cs (ForgeBehaviour). Запрещены .tsx/.jsx/React.
 - scene.list перед тем как плодить дубликаты. Не копируй Player/Ground без нужды.
 - project.seed_demo только если просили демо SkyRunner.
 - Не заканчивай done, пока заказ не выполнен. Пустая сцена после «сделай РПГ» — провал.

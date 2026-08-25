@@ -121,6 +121,14 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     var newRepoName by mutableStateOf("")
     var newRepoPrivate by mutableStateOf(true)
     var boundRepo by mutableStateOf("")
+    var repoOnly by mutableStateOf(false)
+    val modelStore = com.mobileforge.ai.ModelStore(prefs)
+    val userModels = mutableStateListOf<com.mobileforge.ai.UserModel>()
+    var newModelId by mutableStateOf("")
+    var newModelLabel by mutableStateOf("")
+    var newModelProvider by mutableStateOf("zen")
+    var newModelFormat by mutableStateOf("json")
+    var editModelUid by mutableStateOf<String?>(null)
     var cloudBusy by mutableStateOf(false)
     var mcpServers = mutableStateListOf<McpServer>()
     var mcpTools = mutableStateListOf<McpTool>()
@@ -165,7 +173,49 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun sessionLeftMs(): Long = (sessionLimitMs - sessionElapsedMs()).coerceAtLeast(0)
 
     val models: List<String>
-        get() = (ModelCatalog.idsFor(provider) + listOfNotNull(customModel.ifBlank { null })).distinct()
+        get() = (ModelCatalog.idsFor(provider) + userModels.map { it.id } + listOfNotNull(customModel.ifBlank { null })).distinct()
+
+    fun reloadUserModels() {
+        userModels.clear()
+        userModels += modelStore.list()
+    }
+
+    fun saveUserModel() {
+        val id = newModelId.trim()
+        if (id.isBlank()) return notify("Нужен id модели")
+        modelStore.upsert(
+            com.mobileforge.ai.UserModel(
+                uid = editModelUid ?: java.util.UUID.randomUUID().toString().take(8),
+                providerId = newModelProvider.ifBlank { "zen" },
+                id = id,
+                label = newModelLabel.ifBlank { id },
+                toolFormat = newModelFormat.ifBlank { "json" },
+            ),
+        )
+        editModelUid = null
+        newModelId = ""; newModelLabel = ""
+        reloadUserModels()
+        notify("Модель $id")
+    }
+
+    fun beginEditModel(uid: String) {
+        val m = userModels.find { it.uid == uid } ?: return
+        editModelUid = m.uid
+        newModelId = m.id
+        newModelLabel = m.label
+        newModelProvider = m.providerId
+        newModelFormat = m.toolFormat
+    }
+
+    fun deleteUserModel(uid: String) {
+        modelStore.delete(uid)
+        reloadUserModels()
+    }
+
+    fun setRepoOnly(on: Boolean) {
+        repoOnly = on
+        prefs.edit().putBoolean("repo_only", on).apply()
+    }
 
     fun projectsRoot(): String = store.root.absolutePath
 
@@ -197,6 +247,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         refreshGithub()
         refreshMcp()
         boundRepo = prefs.getString("gh_bound_repo", "").orEmpty()
+        repoOnly = prefs.getBoolean("repo_only", false)
+        reloadUserModels()
         customEndpoint = prefs.getString("custom_endpoint", "").orEmpty()
         provider = prefs.getString("ai_provider", "zen").orEmpty().ifBlank { "zen" }
         model = prefs.getString("${provider}_model", ModelCatalog.defaultId(provider))
@@ -617,6 +669,14 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         notify("+ $type")
     }
 
+    fun setComponentField(index: Int, key: String, value: String) {
+        val obj = selectedObject() ?: return
+        val arr = obj.extra.optJSONArray("components") ?: return
+        val o = arr.optJSONObject(index) ?: return
+        value.toDoubleOrNull()?.let { o.put(key, it) } ?: o.put(key, value)
+        persistScene(false)
+    }
+
     fun savePrefab(name: String): String {
         val p = current(false) ?: return "ERROR: no project"
         val obj = scene?.objects?.firstOrNull { it.name == name } ?: return "ERROR: нет $name"
@@ -697,7 +757,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             solid = type != "Camera" && type != "Light" && type != "Coin",
             mesh = mesh,
             material = material,
-            script = args.optString("script").ifBlank { if (type == "Player") "Scripts/Player.js" else "" },
+            script = args.optString("script").ifBlank { if (type == "Player") "Scripts/Player.cs" else "" },
             extra = extra,
             lightType = if (type == "Light") "Directional" else "Directional",
         )
@@ -736,9 +796,14 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
         playControls = runCatching {
-            val file = store.resolve(project, "UI/Controls.json")
-            if (file.isFile) ControlLayout.parse(file.readText()) else ControlLayout.EMPTY
+            val file = listOf("UI/Controls.json", "Assets/UI/Controls.json")
+                .map { store.resolve(project, it) }.firstOrNull { it.isFile }
+            if (file != null) ControlLayout.parse(file.readText()) else ControlLayout.EMPTY
         }.getOrDefault(ControlLayout.EMPTY)
+        if (playControls.items.isEmpty() && Director.wantsControls(lastSubstantialTask.ifBlank { lastDirectorTask })) {
+            playControls = ControlLayout.defaultPad()
+            store.writeFile(project, "UI/Controls.json", ControlLayout.toJson(playControls))
+        }
         runtime?.stop()
         val bank = soundBank ?: SoundBank(getApplication()).also { soundBank = it }
         val wavs = runCatching { bank.loadFrom(project.directory) }.getOrDefault(emptyList())
@@ -1301,6 +1366,14 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 "user",
                 buildString {
                     appendLine("Язык: русский. Размышляй и отвечай только по-русски.")
+                    val kind = Director.classify(order)
+                    appendLine("ТИП ЗАКАЗА: $kind")
+                    if (kind == Director.Kind.Github) {
+                        appendLine("Это GitHub. Не project.create / scene.add_object. github.repos / github.ls / github.read / github.write.")
+                        appendLine("Репо: ${boundRepo.ifBlank { "нет" }} PAT: ${if (github.activeToken().isNullOrBlank()) "НЕТ" else "есть"}")
+                    }
+                    appendLine("Скрипты только Scripts/*.cs. .tsx/.jsx запрещены.")
+                    if (Director.wantsControls(order)) appendLine("Просили управление — controls.set с joystick+кнопками.")
                     appendLine()
                     appendLine("ПЕРЕПИСКА СЕССИИ (не забывай, анализируй):")
                     appendLine(memory.ifBlank { "(пусто — это первое сообщение)" })
@@ -1675,7 +1748,22 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    private fun sanitizeScriptPath(path: String, content: String): String {
+        val p = path.replace('\\', '/').trimStart('/')
+        val body = content.lowercase()
+        if (p.endsWith(".tsx", true) || p.endsWith(".jsx", true) || p.endsWith(".ts", true) ||
+            "from 'react'" in body || "from \"react\"" in body
+        ) {
+            return "ERROR: только Scripts/*.cs (ForgeBehaviour). TSX/React не принимаются."
+        }
+        return p
+    }
+
     private fun executeAgentTool(tool: String, args: org.json.JSONObject): String {
+        val kind = Director.classify(lastDirectorTask.ifBlank { lastUtterance })
+        if (kind == Director.Kind.Github && tool in setOf("project.create", "project.seed_demo", "scene.add_object", "scene.create")) {
+            return "SKIPPED: заказ про GitHub. Используй github.ls / github.read / github.write."
+        }
         return when (tool) {
             "project.create" -> {
                 if (Director.isFollowUp(lastUtterance) && !projectName.isNullOrBlank()) {
@@ -1731,17 +1819,15 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             "scene.add_object" -> addObjectFromArgs(args)
             "asset.create" -> createAsset(args)
             "controls.set" -> {
-                if (!Director.wantsControls(lastDirectorTask)) {
-                    "SKIPPED: director did not ask for touch UI / joystick / buttons"
-                } else {
-                    val p = current(false) ?: error("no project")
-                    val body = if (args.has("items")) {
-                        org.json.JSONObject().put("format", "mobileforge.controls.v1").put("items", args.get("items")).toString(2)
-                    } else args.toString(2)
-                    store.writeFile(p, "UI/Controls.json", body).getOrThrow()
-                    refreshFiles()
-                    "controls saved"
-                }
+                val p = current(false) ?: error("no project")
+                val parsed = ControlLayout.parse(
+                    if (args.has("items")) org.json.JSONObject().put("items", args.get("items")).toString() else args.toString(),
+                )
+                val layout = if (parsed.items.isEmpty()) ControlLayout.defaultPad() else parsed
+                store.writeFile(p, "UI/Controls.json", ControlLayout.toJson(layout)).getOrThrow()
+                playControls = layout
+                refreshFiles()
+                "controls saved ${layout.items.size}"
             }
             "play.start" -> {
                 startPlay()
@@ -1818,6 +1904,37 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             There is NO default on-screen touch UI. If the director asks for controls/joystick/buttons/HUD,
             create UI/Controls.json:
             {"format":"mobileforge.controls.v1","items":[{"type":"joystick","anchor":"bl","action":"move"},{"type":"button","anchor":"br","label":"Jump","action":"jump"}]}
+            Do not add touch controls unless explicitly asked.
+            Command type: ${aiCommand.name}
+            Preferred language: $aiLanguage (.cs first)
+            Event hook if relevant: $aiEvent
+            Project: ${projectName ?: "none"}
+            $sceneCtx
+            $fileCtx
+            ORDER FROM DIRECTOR:
+            $aiTask
+        """.trimIndent()
+    }
+}
+ a code-only agent for MobileForge. The human is the director.
+            Do not invent gameplay, art direction or architecture beyond the order.
+            Write only code. Return complete files in fenced blocks with paths, e.g. ```Scripts/Player.cs
+            There is NO default on-screen touch UI. If the director asks for controls/joystick/buttons/HUD,
+            create UI/Controls.json:
+            {"format":"mobileforge.controls.v1","items":[{"type":"joystick","anchor":"bl","action":"move"},{"type":"button","anchor":"br","label":"Jump","action":"jump"}]}
+            Do not add touch controls unless explicitly asked.
+            Command type: ${aiCommand.name}
+            Preferred language: $aiLanguage (.cs first)
+            Event hook if relevant: $aiEvent
+            Project: ${projectName ?: "none"}
+            $sceneCtx
+            $fileCtx
+            ORDER FROM DIRECTOR:
+            $aiTask
+        """.trimIndent()
+    }
+}
+eforge.controls.v1","items":[{"type":"joystick","anchor":"bl","action":"move"},{"type":"button","anchor":"br","label":"Jump","action":"jump"}]}
             Do not add touch controls unless explicitly asked.
             Command type: ${aiCommand.name}
             Preferred language: $aiLanguage (.cs first)

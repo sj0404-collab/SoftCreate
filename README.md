@@ -1,10 +1,10 @@
-# MobileForge 2.13
+# MobileForge 2.14
 
-Рантайм Unity / Godot / Unreal на одном движке: компоненты реально тикают в Play.
+- GitHub API у агента, режим «только репо»
+- Скрипты только `.cs`, TSX отклоняется
+- Джойстик из кривого JSON + автопад
+- Свои модели: добавить / править / удалить
+- 3D земля по Plane, parent в рендере, частицы в Play
+- Инспектор правит поля компонентов
 
-- Rigidbody / CharacterController / Animator / ParticleSystem / NavMeshAgent / AudioSource / Projectile
-- Алиасы Godot и Unreal (RigidBody3D, CharacterBody3D, Niagara, Pawn…)
-- Префабы, parent, timeScale, гравитация
-- Выбранная модель не подменяется другой семьёй
-
-APK собирает GitHub Actions.
+APK — GitHub Actions.

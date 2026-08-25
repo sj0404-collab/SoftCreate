@@ -101,7 +101,7 @@ fun PlayScreen(vm: AppViewModel, modifier: Modifier = Modifier) {
         DesignedControls(vm.playControls, vm)
         if (vm.playControls.items.isEmpty() && runtime != null) {
             Text(
-                "Сенсор не задан. Попросите AI создать UI/Controls.json",
+                "Нет HUD. Напишите агенту: «добавь джойстик»",
                 color = MfMuted,
                 fontSize = 11.sp,
                 modifier = Modifier.align(Alignment.BottomCenter).padding(10.dp),

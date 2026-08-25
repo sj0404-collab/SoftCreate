@@ -110,6 +110,37 @@ class GitHubService(
             Unit
         }
 
+    data class GhContent(val name: String, val path: String, val type: String, val size: Int)
+
+    fun listContents(repo: String, path: String = ""): Result<List<GhContent>> = runCatching {
+        val suffix = if (path.isBlank()) "" else "/${path.trimStart('/')}"
+        val text = raw("GET", "https://api.github.com/repos/$repo/contents$suffix", token(), null)
+        val arr = if (text.trimStart().startsWith("[")) JSONArray(text) else JSONArray().put(JSONObject(text))
+        (0 until arr.length()).map { i ->
+            val o = arr.getJSONObject(i)
+            GhContent(o.optString("name"), o.optString("path"), o.optString("type"), o.optInt("size"))
+        }
+    }
+
+    fun getFileText(repo: String, path: String): Result<String> = runCatching {
+        val json = request("GET", "https://api.github.com/repos/$repo/contents/${path.trimStart('/')}", token())
+        val content = json.optString("content").replace("\n", "")
+        if (json.optString("encoding") == "base64" && content.isNotBlank()) {
+            String(Base64.decode(content, Base64.DEFAULT), Charsets.UTF_8)
+        } else error("нет содержимого $path")
+    }
+
+    fun deleteFile(repo: String, path: String, message: String): Result<Unit> = runCatching {
+        val sha = request("GET", "https://api.github.com/repos/$repo/contents/${path.trimStart('/')}", token()).optString("sha")
+        raw(
+            "DELETE",
+            "https://api.github.com/repos/$repo/contents/${path.trimStart('/')}",
+            token(),
+            JSONObject().put("message", message).put("sha", sha).toString(),
+        )
+        Unit
+    }
+
     fun runs(repo: String): Result<List<GhRun>> = runCatching {
         val json = request("GET", "https://api.github.com/repos/$repo/actions/runs?per_page=10", token())
         val arr = json.optJSONArray("workflow_runs") ?: JSONArray()

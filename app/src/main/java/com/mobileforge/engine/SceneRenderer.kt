@@ -80,6 +80,18 @@ object SceneRenderer {
     private fun snapObjects(scene: GameScene): List<SceneObject> =
         runCatching { scene.objects.toList() }.getOrDefault(emptyList())
 
+    private fun world(scene: GameScene, obj: SceneObject): Triple<Float, Float, Float> {
+        val map = snapObjects(scene).associateBy { it.name }
+        var x = obj.x; var y = obj.y; var z = obj.z
+        var p = map[obj.parent]
+        val seen = hashSetOf(obj.name)
+        while (p != null && seen.add(p.name)) {
+            x += p.x; y += p.y; z += p.z
+            p = map[p.parent]
+        }
+        return Triple(x, y, z)
+    }
+
     private fun extraStr(obj: SceneObject, key: String, def: String): String =
         runCatching { obj.extra.optString(key, def).ifBlank { def } }.getOrDefault(def)
 
@@ -99,8 +111,9 @@ object SceneRenderer {
             scope.drawLine(Color.White.copy(alpha = 0.08f), Offset(x, 0f), Offset(x, h))
         }
         snapObjects(scene).filter { it.type != "Camera" && it.type != "Light" }.forEach { obj ->
-            val x = w / 2f + (obj.x - camX) * scale
-            val y = h / 2f - (obj.y - camY) * scale
+            val (wx, wy, _) = world(scene, obj)
+            val x = w / 2f + (wx - camX) * scale
+            val y = h / 2f - (wy - camY) * scale
             val bw = maxOf(8f, kotlin.math.abs(obj.sx) * scale)
             val bh = maxOf(8f, kotlin.math.abs(obj.sy) * scale)
             val color = parseColor(obj.color)
@@ -164,7 +177,9 @@ object SceneRenderer {
         }
         val faces = mutableListOf<Face>()
         snapObjects(scene).filter { it.type != "Camera" }.forEach { obj ->
-            faces += cubeFaces(obj, camX, camY, camZ, camRx, camRy, w, h, selected == obj.name)
+            val (wx, wy, wz) = world(scene, obj)
+            val placed = obj.copy(x = wx, y = wy, z = wz)
+            faces += cubeFaces(placed, camX, camY, camZ, camRx, camRy, w, h, selected == obj.name)
         }
         faces.sortedByDescending { it.z }.forEach { face ->
             val path = Path().apply {

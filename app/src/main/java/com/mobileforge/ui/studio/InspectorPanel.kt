@@ -59,6 +59,19 @@ fun InspectorPanel(vm: AppViewModel, modifier: Modifier = Modifier) {
         MfButton(if (obj.enabled) "Enabled: ON" else "Enabled: OFF") { vm.updateSelected { o -> o.enabled = !o.enabled } }
         MfField(obj.parent, { vm.updateSelected { o -> o.parent = it } }, "parent")
         Text("Компоненты", color = MfMuted, fontSize = 11.sp)
+        val comps = obj.extra.optJSONArray("components")
+        if (comps != null) {
+            for (i in 0 until comps.length()) {
+                val c = comps.optJSONObject(i) ?: continue
+                Text(c.optString("type"), color = MfText, fontSize = 12.sp)
+                val iter = c.keys()
+                while (iter.hasNext()) {
+                    val k = iter.next()
+                    if (k == "type" || k == "enabled" || k.startsWith("_")) continue
+                    MfField(c.opt(k).toString(), { raw -> vm.setComponentField(i, k, raw) }, k)
+                }
+            }
+        }
         listOf("Rigidbody", "CharacterController", "Animator", "ParticleSystem", "NavMeshAgent", "AudioSource").forEach { t ->
             MfButton("+ $t") { vm.addComponentToSelected(t) }
         }

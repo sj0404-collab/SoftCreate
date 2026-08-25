@@ -26,6 +26,7 @@ import com.mobileforge.ui.common.MfHero
 import com.mobileforge.ui.theme.MfDanger
 import com.mobileforge.ui.theme.MfMuted
 import com.mobileforge.ui.theme.MfOk
+import com.mobileforge.ui.theme.MfText
 
 @Composable
 fun SettingsScreen(vm: AppViewModel) {
@@ -64,8 +65,24 @@ fun SettingsScreen(vm: AppViewModel) {
             fontSize = 12.sp,
             modifier = Modifier.padding(top = 8.dp),
         )
+        Text("Репо и модели", color = MfText, fontSize = 15.sp)
+        MfButton(if (vm.repoOnly) "Писать только в GitHub-репо" else "Локальный проект + GitHub") {
+            vm.setRepoOnly(!vm.repoOnly)
+        }
+        MfField(vm.newModelId, { vm.newModelId = it }, "id модели (mimo-v2.5-free)")
+        MfField(vm.newModelLabel, { vm.newModelLabel = it }, "подпись")
+        MfField(vm.newModelProvider, { vm.newModelProvider = it }, "провайдер zen|openrouter|orca|gemini|custom")
+        MfField(vm.newModelFormat, { vm.newModelFormat = it }, "json или xml")
+        MfButton(if (vm.editModelUid == null) "Добавить модель" else "Сохранить правку", primary = true) { vm.saveUserModel() }
+        vm.userModels.forEach { m ->
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("${m.label} · ${m.id}", color = MfText, fontSize = 12.sp, modifier = Modifier.weight(1f))
+                MfButton("ред.") { vm.beginEditModel(m.uid) }
+                MfButton("удал.") { vm.deleteUserModel(m.uid) }
+            }
+        }
         Text(
-            "Сборка APK — GitHub Actions, не телефон. Несколько PAT: вкладка Cloud.",
+            "Сборка APK — GitHub Actions. PAT — Cloud. Выбранная модель не подменяется.",
             color = MfMuted,
             fontSize = 12.sp,
         )

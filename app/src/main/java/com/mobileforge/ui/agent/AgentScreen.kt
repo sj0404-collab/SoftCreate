@@ -470,6 +470,19 @@ private fun ModelChip(vm: AppViewModel) {
                     )
                 }
             }
+            if (vm.userModels.isNotEmpty()) {
+                DropdownMenuItem(
+                    text = { Text("Свои модели", color = Mute, fontSize = 11.sp, fontWeight = FontWeight.SemiBold) },
+                    onClick = {},
+                    enabled = false,
+                )
+                vm.userModels.forEach { m ->
+                    DropdownMenuItem(
+                        text = { Text("${m.label} · ${m.id}", fontSize = 13.sp) },
+                        onClick = { vm.setRoute(m.providerId, m.id); open = false },
+                    )
+                }
+            }
         }
     }
 }
