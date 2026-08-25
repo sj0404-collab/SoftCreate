@@ -1,6 +1,7 @@
 package com.mobileforge.ui.play
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Box
@@ -97,6 +98,27 @@ fun PlayScreen(vm: AppViewModel, modifier: Modifier = Modifier) {
         )
         if (vm.playHud.isNotBlank()) {
             Text(vm.playHud, color = MfText, fontSize = 13.sp, modifier = Modifier.padding(12.dp))
+        }
+        val snap = frameScene
+        snap?.objects?.filter { it.type == "Button" || it.type == "Text" || it.type == "Canvas" }?.forEach { ui ->
+            Text(
+                ui.extra.optString("text").ifBlank { ui.name },
+                color = MfText,
+                fontSize = 14.sp,
+                modifier = Modifier
+                    .align(
+                        when (ui.extra.optString("anchor", "tl")) {
+                            "br" -> Alignment.BottomEnd
+                            "bl" -> Alignment.BottomStart
+                            "tr" -> Alignment.TopEnd
+                            else -> Alignment.TopStart
+                        },
+                    )
+                    .padding(12.dp)
+                    .then(
+                        if (ui.type == "Button") Modifier.clickable { vm.runtime?.click() } else Modifier,
+                    ),
+            )
         }
         DesignedControls(vm.playControls, vm)
         if (vm.playControls.items.isEmpty() && runtime != null) {

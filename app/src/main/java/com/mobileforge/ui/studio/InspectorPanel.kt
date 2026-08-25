@@ -42,6 +42,9 @@ fun InspectorPanel(vm: AppViewModel, modifier: Modifier = Modifier) {
         MfField(obj.material, { vm.updateSelected { o -> o.material = it } }, "material")
         MfField(obj.asset, { vm.updateSelected { o -> o.asset = it } }, "model")
         MfField(obj.script, { vm.updateSelected { o -> o.script = it } }, "script (.cs)")
+        MfButton("+ ещё скрипт") { vm.addScriptToSelected("Scripts/Extra.cs") }
+        MfButton("граф на объект") { vm.bindGraphToSelected() }
+        MfButton("экспорт игрока") { vm.exportPlayer() }
         MfField(obj.speed.toString(), { setNum(it) { n -> vm.updateSelected { o -> o.speed = n } } }, "speed", numeric = true)
         MfField(obj.mass.toString(), { setNum(it) { n -> vm.updateSelected { o -> o.mass = n } } }, "mass", numeric = true)
         if (obj.type == "Light") {

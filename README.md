@@ -1,10 +1,11 @@
-# MobileForge 2.14
+# MobileForge 2.15
 
-- GitHub API у агента, режим «только репо»
-- Скрипты только `.cs`, TSX отклоняется
-- Джойстик из кривого JSON + автопад
-- Свои модели: добавить / править / удалить
-- 3D земля по Plane, parent в рендере, частицы в Play
-- Инспектор правит поля компонентов
+Unity-like на телефоне:
+
+- FixedUpdate, raycast, слои
+- parent с поворотом
+- несколько скриптов + визуальные ноды (вкладка Ноды)
+- Canvas Button/Text в Play
+- Экспорт игрока: Export/index.html
 
 APK — GitHub Actions.

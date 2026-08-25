@@ -82,12 +82,21 @@ object SceneRenderer {
 
     private fun world(scene: GameScene, obj: SceneObject): Triple<Float, Float, Float> {
         val map = snapObjects(scene).associateBy { it.name }
-        var x = obj.x; var y = obj.y; var z = obj.z
-        var p = map[obj.parent]
-        val seen = hashSetOf(obj.name)
-        while (p != null && seen.add(p.name)) {
-            x += p.x; y += p.y; z += p.z
-            p = map[p.parent]
+        val chain = ArrayList<SceneObject>()
+        var cur: SceneObject? = obj
+        val seen = hashSetOf<String>()
+        while (cur != null && seen.add(cur.name)) {
+            chain.add(0, cur)
+            cur = map[cur.parent]
+        }
+        var x = 0f; var y = 0f; var z = 0f; var yaw = 0f
+        chain.forEach { n ->
+            val rad = Math.toRadians(yaw.toDouble())
+            val lx = n.x; val lz = n.z
+            x += (lx * kotlin.math.cos(rad) + lz * kotlin.math.sin(rad)).toFloat()
+            z += (-lx * kotlin.math.sin(rad) + lz * kotlin.math.cos(rad)).toFloat()
+            y += n.y
+            yaw += n.ry
         }
         return Triple(x, y, z)
     }

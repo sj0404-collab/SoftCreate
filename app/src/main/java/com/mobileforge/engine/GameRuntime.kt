@@ -24,6 +24,7 @@ class Actor(src: SceneObject) {
     var extra: org.json.JSONObject = org.json.JSONObject(src.extra.toString())
     var parent: String = src.parent
     var tag: String = src.tag
+    var layer: String = src.layer
     var vx: Float = 0f
     var vy: Float = 0f
     var vz: Float = 0f
@@ -49,6 +50,7 @@ class GameRuntime(
     private val onLoadScene: ((String) -> Unit)? = null,
     private val onSound: ((String) -> Unit)? = null,
     private val prefabs: Map<String, String> = emptyMap(),
+    private val graphs: Map<String, VisualGraph> = emptyMap(),
 ) {
     var dimension: String = source.dimension
     val actors = source.objects.map { Actor(it) }.toMutableList()
@@ -62,15 +64,39 @@ class GameRuntime(
     var playing: Boolean = false
         private set
 
-    private val compiled = HashMap<String, ScriptInterpreter>()
+    private val compiled = HashMap<String, MutableList<ScriptInterpreter>>()
+    private val boundGraphs = HashMap<String, VisualGraph>()
+    private var physAcc = 0f
+    private val fixedDt = 0.02f
 
     init {
         actors.forEach { actor ->
-            val raw = scripts[actor.script] ?: return@forEach
-            runCatching {
-                compiled[actor.name] = ScriptInterpreter(CsTranspiler.scriptSource(actor.script, raw))
-            }.onFailure { log("compile ${actor.name}: ${it.message}") }
+            val paths = scriptPaths(actor)
+            val list = mutableListOf<ScriptInterpreter>()
+            paths.forEach { path ->
+                val raw = scripts[path] ?: return@forEach
+                runCatching {
+                    list += ScriptInterpreter(CsTranspiler.scriptSource(path, raw))
+                }.onFailure { log("compile ${actor.name}/$path: ${it.message}") }
+            }
+            if (list.isNotEmpty()) compiled[actor.name] = list
+            val gpath = actor.extra.optString("graph")
+            if (gpath.isNotBlank()) graphs[gpath]?.let { boundGraphs[actor.name] = it }
+            else if (paths.isEmpty() && actor.type in listOf("Player", "Pawn", "Character")) {
+                boundGraphs[actor.name] = VisualGraph.playerDefault()
+            }
         }
+    }
+
+    private fun scriptPaths(actor: Actor): List<String> {
+        val out = mutableListOf<String>()
+        if (actor.script.isNotBlank()) out += actor.script
+        val arr = actor.extra.optJSONArray("scripts")
+        if (arr != null) for (i in 0 until arr.length()) {
+            val s = arr.optString(i)
+            if (s.isNotBlank() && s !in out) out += s
+        }
+        return out
     }
 
     fun start() {
@@ -93,11 +119,20 @@ class GameRuntime(
         elapsed += clamped
         actors.filter { it.alive }.forEach { actor ->
             call(actor, "onUpdate", clamped)
+            fireGraphActor(actor, "onUpdate", clamped)
             applyComponents(actor, clamped)
             applyBuiltinUpdate(actor, clamped)
-            integrate(actor, clamped)
         }
-        resolveCollisions()
+        physAcc += clamped
+        while (physAcc >= fixedDt) {
+            actors.filter { it.alive }.forEach { actor ->
+                call(actor, "onFixedUpdate", fixedDt)
+                fireGraphActor(actor, "onFixedUpdate", fixedDt)
+                integrate(actor, fixedDt)
+            }
+            resolveCollisions()
+            physAcc -= fixedDt
+        }
         actors.removeAll { !it.alive }
     }
 
@@ -120,14 +155,52 @@ class GameRuntime(
     }
 
     private fun call(actor: Actor, event: String, dt: Float, other: Actor? = null) {
-        val script = compiled[actor.name] ?: return
-        if (!script.has(event)) return
-        val env = mutableMapOf(
-            "api" to hostApi(actor, dt),
-            "dt" to ScriptInterpreter.Val.Num(dt.toDouble()),
-            "other" to if (other != null) actorVal(other) else ScriptInterpreter.Val.Null,
-        )
-        runCatching { script.call(event, env) }.onFailure { log("$event ${actor.name}: ${it.message}") }
+        val list = compiled[actor.name] ?: return
+        list.forEach { script ->
+            if (!script.has(event)) return@forEach
+            val env = mutableMapOf(
+                "api" to hostApi(actor, dt),
+                "dt" to ScriptInterpreter.Val.Num(dt.toDouble()),
+                "other" to if (other != null) actorVal(other) else ScriptInterpreter.Val.Null,
+            )
+            runCatching { script.call(event, env) }.onFailure { log("$event ${actor.name}: ${it.message}") }
+        }
+    }
+
+    private fun fireGraph(event: String, other: Actor? = null) {
+        actors.filter { it.alive }.forEach { fireGraphActor(it, event, 0f, other) }
+    }
+
+    private fun fireGraphActor(actor: Actor, event: String, dt: Float, other: Actor? = null) {
+        val g = boundGraphs[actor.name] ?: return
+        GraphRunner.run(g, event, actor, this, dt, other)
+    }
+
+    fun playSound(name: String) {
+        onSound?.invoke(name)
+    }
+
+    fun raycast(from: Actor, dist: Float, layer: String = ""): Actor? {
+        val yaw = Math.toRadians(from.ry.toDouble())
+        val fx = kotlin.math.sin(yaw).toFloat()
+        val fz = kotlin.math.cos(yaw).toFloat()
+        var best: Actor? = null
+        var bestD = dist
+        actors.filter { it.alive && it.name != from.name }.forEach { o ->
+            if (layer.isNotBlank() && o.layer != layer && o.tag != layer) return@forEach
+            val dx = o.x - from.x
+            val dz = o.z - from.z
+            val along = dx * fx + dz * fz
+            if (along <= 0f || along > bestD) return@forEach
+            val px = from.x + fx * along
+            val pz = from.z + fz * along
+            if (kotlin.math.abs(px - o.x) < (kotlin.math.abs(o.sx) + 0.4f) &&
+                kotlin.math.abs(pz - o.z) < (kotlin.math.abs(o.sz) + 0.4f)
+            ) {
+                best = o; bestD = along
+            }
+        }
+        return best
     }
 
     private fun eachComp(actor: Actor, type: String, fn: (org.json.JSONObject) -> Unit) {
@@ -262,7 +335,7 @@ class GameRuntime(
     }
 
     private fun applyBuiltinUpdate(actor: Actor, dt: Float) {
-        if (compiled.containsKey(actor.name)) return
+        if (compiled.containsKey(actor.name) || boundGraphs.containsKey(actor.name)) return
         when (actor.type) {
             "Player", "Pawn", "Character" -> {
                 val speed = if (actor.speed == 0f) 6f else actor.speed
@@ -295,6 +368,19 @@ class GameRuntime(
                 log("урон -2")
             }
         }
+    }
+
+    fun instantiate(prefab: String, x: Float, y: Float, z: Float): Actor {
+        val raw = prefabs[prefab]
+        val src = if (!raw.isNullOrBlank()) runCatching { SceneObject.fromJson(org.json.JSONObject(raw)) }.getOrNull() else null
+        val base = src ?: SceneObject(prefab.ifBlank { "Spawn" }, "Mesh", x, y, z)
+        var n = base.name
+        if (actors.any { it.name == n }) n = "${n}_${actors.size}"
+        val copy = Actor(base)
+        copy.name = n
+        copy.x = x; copy.y = y; copy.z = z
+        actors += copy
+        return copy
     }
 
     private fun hostApi(actor: Actor, dt: Float): ScriptInterpreter.Val.Obj {

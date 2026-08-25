@@ -96,6 +96,7 @@ private val tabs = listOf(
     Section.Cloud to ("☁" to "Cloud"),
     Section.Mcp to ("⚒" to "MCP"),
     Section.Settings to ("⚙" to "Ещё"),
+    Section.Graph to ("◎" to "Ноды"),
 )
 
 @Composable
@@ -160,6 +161,7 @@ fun AgentScreen(vm: AppViewModel) {
                 Section.Cloud -> CloudScreen(vm)
                 Section.Mcp -> McpScreen(vm)
                 Section.Settings -> SettingsScreen(vm)
+                Section.Graph -> com.mobileforge.ui.graph.GraphScreen(vm)
             }
         }
         if (vm.section == Section.Agent) InputBar(vm)

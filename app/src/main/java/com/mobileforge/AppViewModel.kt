@@ -47,7 +47,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 
-enum class Section { Agent, Projects, Files, Studio, Assets, Play, Cloud, Mcp, Ai, Settings, Changes, Plugins }
+enum class Section { Agent, Projects, Files, Studio, Assets, Play, Cloud, Mcp, Ai, Settings, Changes, Plugins, Graph }
 enum class AiCommand { Create, Change, Delete, Explain }
 
 data class ProjectItem(val name: String, val type: String)
@@ -82,6 +82,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     val orbit = Orbit()
     var runtime by mutableStateOf<GameRuntime?>(null)
     var playHud by mutableStateOf("")
+    var graph by mutableStateOf<com.mobileforge.engine.VisualGraph?>(null)
+    var graphName by mutableStateOf("Player")
+    var graphSelected by mutableStateOf<String?>(null)
+    var playStandalone by mutableStateOf(false)
     var playControls by mutableStateOf(ControlLayout.EMPTY)
     var provider by mutableStateOf("zen")
     var model by mutableStateOf("laguna-s-2.1-free")
@@ -369,6 +373,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     refreshFiles()
                     reloadPlugins()
                 }
+                Section.Graph -> withContext(Dispatchers.Main) { refreshFiles() }
                 Section.Settings -> withContext(Dispatchers.Main) { refreshProviderFlags() }
                 Section.Cloud -> withContext(Dispatchers.Main) { refreshGithub() }
                 Section.Mcp -> withContext(Dispatchers.Main) { refreshMcp() }
@@ -662,6 +667,83 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         persistScene(false)
     }
 
+    fun newPlayerGraph() {
+        graph = com.mobileforge.engine.VisualGraph.playerDefault()
+        graphName = "Player"
+        graphSelected = graph?.nodes?.firstOrNull()?.id
+        notify("Граф игрока")
+    }
+
+    fun addGraphNode(kind: String) {
+        val g = graph ?: com.mobileforge.engine.VisualGraph(graphName).also { graph = it }
+        val id = "n${g.nodes.size + 1}"
+        g.nodes += com.mobileforge.engine.GraphNode(id, kind, 20f, 40f * g.nodes.size)
+        if (graphSelected != null) g.links += com.mobileforge.engine.GraphLink(graphSelected!!, id)
+        graphSelected = id
+        graph = g
+    }
+
+    fun replaceGraphNode(id: String, kind: String) {
+        val g = graph ?: return
+        g.nodes.find { it.id == id }?.kind = kind
+        graph = g
+    }
+
+    fun removeGraphNode(id: String) {
+        val g = graph ?: return
+        g.nodes.removeAll { it.id == id }
+        g.links.removeAll { it.from == id || it.to == id }
+        if (graphSelected == id) graphSelected = null
+        graph = g
+    }
+
+    fun linkToNext(id: String) {
+        val g = graph ?: return
+        val i = g.nodes.indexOfFirst { it.id == id }
+        if (i < 0 || i + 1 >= g.nodes.size) return
+        val to = g.nodes[i + 1].id
+        if (g.links.none { it.from == id && it.to == to }) g.links += com.mobileforge.engine.GraphLink(id, to)
+        graph = g
+    }
+
+    fun saveGraph() {
+        val p = current() ?: return
+        val g = graph ?: return notify("Нет графа")
+        g.name = graphName.ifBlank { "Graph" }
+        val path = "Assets/Graphs/${g.name}.json"
+        store.writeFile(p, path, g.toJson().toString(2))
+        refreshFiles()
+        notify("Сохранён $path")
+    }
+
+    fun bindGraphToSelected() {
+        val obj = selectedObject() ?: return notify("Выберите объект")
+        val g = graph ?: return notify("Нет графа")
+        saveGraph()
+        obj.extra.put("graph", "Assets/Graphs/${g.name}.json")
+        persistScene(true)
+        notify("Граф на ${obj.name}")
+    }
+
+    fun addScriptToSelected(path: String) {
+        val obj = selectedObject() ?: return
+        val arr = obj.extra.optJSONArray("scripts") ?: org.json.JSONArray().also { obj.extra.put("scripts", it) }
+        arr.put(path)
+        if (obj.script.isBlank()) obj.script = path
+        persistScene(true)
+    }
+
+    fun exportPlayer() {
+        val p = current() ?: return
+        val sc = scene ?: return notify("Нет сцены")
+        val html = com.mobileforge.export.HtmlPreview.player(sc, playControls)
+        store.writeFile(p, "Export/index.html", html)
+        store.writeFile(p, "Export/game.json", sc.toJson().toString(2))
+        refreshFiles()
+        notify("Игрок: Export/index.html — откройте или залейте в Cloud")
+        log("Player export ${sc.name}")
+    }
+
     fun addComponentToSelected(type: String) {
         val obj = selectedObject() ?: return notify("Нет объекта")
         com.mobileforge.engine.addComponent(obj.extra, type)
@@ -811,11 +893,25 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         store.files(project).filter { it.relativePath.startsWith("Assets/Prefabs/") }.forEach { f ->
             runCatching { prefabs[f.file.nameWithoutExtension] = f.file.readText() }
         }
+        val graphs = HashMap<String, com.mobileforge.engine.VisualGraph>()
+        store.files(project).filter { it.relativePath.startsWith("Assets/Graphs/") }.forEach { f ->
+            runCatching { graphs[f.relativePath] = com.mobileforge.engine.VisualGraph.parse(f.file.readText()) }
+        }
+        currentScene.objects.forEach { obj ->
+            val arr = obj.extra.optJSONArray("scripts")
+            if (arr != null) for (i in 0 until arr.length()) {
+                val pth = arr.optString(i)
+                if (pth.isNotBlank() && pth !in scripts) {
+                    runCatching { scripts[pth] = store.resolve(project, pth).readText() }
+                }
+            }
+        }
         runtime = GameRuntime(
             currentScene,
             scripts,
             onSound = { name -> runCatching { bank.play(name) } },
             prefabs = prefabs,
+            graphs = graphs,
         ).also { it.start() }
         runCatching { firePlugin("onPlay") }
         log(
@@ -1855,6 +1951,20 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 "added component → $n"
             }
             "component.list" -> com.mobileforge.engine.EngineKit.allTypes().joinToString()
+            "graph.create" -> {
+                newPlayerGraph()
+                if (args.optString("name").isNotBlank()) graphName = args.optString("name")
+                saveGraph()
+                "graph Assets/Graphs/$graphName.json"
+            }
+            "graph.bind" -> {
+                bindGraphToSelected()
+                "bound"
+            }
+            "export.player" -> {
+                exportPlayer()
+                "Export/index.html"
+            }
             "prefab.save" -> savePrefab(args.optString("name").ifBlank { selected.orEmpty() })
             "prefab.spawn" -> {
                 val p = current(false) ?: error("no project")
