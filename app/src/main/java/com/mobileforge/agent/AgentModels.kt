@@ -221,6 +221,8 @@ object AgentParser {
 - asset.create {"kind":"material","name":"Лес","color":"#1f5c3a","pattern":"noise","accent":"#0b2416","mesh":"Plane"}
 - asset.create {"kind":"mesh","name":"Кристалл","mesh":"pyramid"}
 - asset.create {"kind":"sound","name":"Шаг","freq":220}
+- asset.create {"kind":"blender","name":"Скала","shape":"cube","color":"#6b7c5a"}
+- blender.generate {"name":"Дерево","shape":"cylinder","color":"#2d5a27"}
 - controls.set {"items":[...]}   ТОЛЬКО если режиссёр просил тач/джойстик/кнопки
 - play.start {}
 - plugin.create {"id":"rpgworld","title":"RPG World","code":"function onPlay(api){ api.log(\"play\"); }"}
@@ -240,7 +242,9 @@ object AgentParser {
 - Если просили просторный мир и N биомов — N больших Plane со сдвигом по X/Z, разные цвета/имена, плюс жители.
 - Анимации — только если просили (слово «анимации» в заказе = просили: сделай через скрипт api, без твинов движка если нет инструмента).
 - Джойстик/HUD — только если просили.
-- Скрипты: JS api.move / api.jump / api.input / api.addScore. Пиши Scripts/Player.cs (ForgeBehaviour). Запрещены .tsx/.jsx/React.
+- Play-скрипты сцены: Scripts/*.cs (ForgeBehaviour) или ноды. Остальные языки ПИШИ куда нужно: App/*.tsx, Android/*.kt|java, Android/smali/*.smali, Config/*.yml, Blender/*.py, Native/*.cpp, Web/*.html. Не клади TSX/Java в Scripts/ — агент перенесёт в свою папку.
+- Blender: blender.generate / asset.create kind=blender → Blender/Имя.py (запуск в десктопном Blender) + OBJ/материал в сцену.
+- Делай всё, что нужно заказу: код, меши, графы, github, экспорт. Не выдумывай вредоносный smali/эксплойты.
 - scene.list перед тем как плодить дубликаты. Не копируй Player/Ground без нужды.
 - project.seed_demo только если просили демо SkyRunner.
 - Не заканчивай done, пока заказ не выполнен. Пустая сцена после «сделай РПГ» — провал.

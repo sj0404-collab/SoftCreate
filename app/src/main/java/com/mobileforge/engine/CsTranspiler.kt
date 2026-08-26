@@ -46,7 +46,7 @@ object CsTranspiler {
         fence.findAll(text).forEach { match ->
             val header = match.groupValues[1].trim()
             val body = match.groupValues[2].trimEnd() + "\n"
-            val fromHeader = Regex("""[\w./-]+\.(?:cs|js|kt|cpp|json|glsl|md|txt|lua|xml)""", RegexOption.IGNORE_CASE)
+            val fromHeader = Regex("""[\w./-]+\.(?:cs|js|ts|tsx|jsx|kt|java|smali|yml|yaml|cpp|h|c|json|glsl|md|txt|lua|xml|py|html|css|obj|gradle)""", RegexOption.IGNORE_CASE)
                 .find(header)?.value.orEmpty()
             val first = body.lineSequence().firstOrNull().orEmpty()
             val fromLine = Regex("""^(?://|#|<!--)\s*([A-Za-z0-9_./-]+\.[A-Za-z0-9]+)""")
@@ -60,7 +60,13 @@ object CsTranspiler {
     fun guessPath(language: String, event: String, openPath: String?): String {
         if (!openPath.isNullOrBlank()) return openPath
         val ext = when (language.lowercase()) {
-            "kotlin" -> "kt"
+            "kotlin", "kt" -> "kt"
+            "java" -> "java"
+            "smali" -> "smali"
+            "tsx", "react" -> "tsx"
+            "typescript", "ts" -> "ts"
+            "python", "blender", "py" -> "py"
+            "yaml", "yml" -> "yml"
             "c++" -> "cpp"
             "glsl" -> "glsl"
             "json" -> "json"
@@ -68,21 +74,18 @@ object CsTranspiler {
             else -> "cs"
         }
         val base = event.replace(Regex("[^A-Za-z0-9_]"), "").ifBlank { "Generated" }
-        return when (ext) {
-            "json" -> "Scenes/$base.scene.json"
-            "glsl" -> "Assets/$base.glsl"
-            else -> "Scripts/$base.$ext"
-        }
+        val folder = LangKit.folderFor(ext)
+        return "$folder/$base.$ext"
     }
 
     private fun normalizePath(path: String): String {
         if (path.isBlank()) return ""
         var p = path.replace('\\', '/').trimStart('/')
         if (!p.contains('/')) {
-            p = when {
-                p.endsWith(".cs") || p.endsWith(".js") || p.endsWith(".kt") || p.endsWith(".cpp") || p.endsWith(".lua") -> "Scripts/$p"
-                p.endsWith(".scene.json") -> "Scenes/$p"
-                else -> p
+            p = if (p.endsWith(".scene.json")) "Scenes/$p"
+            else {
+                val ext = p.substringAfterLast('.', "")
+                if (ext.isNotBlank()) "${LangKit.folderFor(ext)}/$p" else p
             }
         }
         return p

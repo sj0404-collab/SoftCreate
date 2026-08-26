@@ -1,11 +1,7 @@
-# MobileForge 2.15
+# MobileForge 2.16
 
-Unity-like на телефоне:
-
-- FixedUpdate, raycast, слои
-- parent с поворотом
-- несколько скриптов + визуальные ноды (вкладка Ноды)
-- Canvas Button/Text в Play
-- Экспорт игрока: Export/index.html
+- Blender: `blender.generate` → `Blender/*.py` + OBJ в сцену
+- Языки проекта: cs, js, ts/tsx, kt, java, smali, yml, py, cpp, glsl, xml, html…
+- Play по-прежнему исполняет `.cs` / ноды; TSX живёт в `App/`
 
 APK — GitHub Actions.

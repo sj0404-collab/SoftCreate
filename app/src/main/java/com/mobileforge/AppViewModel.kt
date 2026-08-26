@@ -561,13 +561,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun createFile(path: String) {
         val project = current() ?: return
-        val seed = when {
-            path.endsWith(".cs") -> "using MobileForge;\npublic class Component : ForgeBehaviour {\n    public float speed = 6f;\n    void Start() { }\n    void Update() {\n        // director writes intent, AI writes code\n    }\n}\n"
-            path.endsWith(".js") -> "function onUpdate(api, dt) {\n  \n}\n"
-            path.endsWith(".json") -> "{\n  \n}\n"
-            path.endsWith(".mat") -> "{\n  \"shader\": \"standard\",\n  \"color\": \"#b69cff\",\n  \"metallic\": 0.0,\n  \"smoothness\": 0.5\n}\n"
-            else -> "// $path\n"
-        }
+        val seed = com.mobileforge.engine.LangKit.seed(path)
         store.createFile(project, path, seed).fold(
             {
                 recordWrite(path, "вы", "", seed)
@@ -1791,6 +1785,18 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 store.writeFile(p, path, AssetKitchen.meshObj(mesh)).getOrThrow()
                 written += path
             }
+            "blender", "bpy", "blend" -> {
+                val shape = args.optString("shape").ifBlank { mesh }
+                val py = "Blender/$name.py"
+                store.writeFile(p, py, com.mobileforge.engine.LangKit.blenderPy(name, shape, color)).getOrThrow()
+                written += py
+                val objPath = "Assets/Meshes/$name.obj"
+                store.writeFile(p, objPath, AssetKitchen.meshObj(shape)).getOrThrow()
+                written += objPath
+                val mat = "Assets/Materials/$name.mat"
+                store.writeFile(p, mat, AssetKitchen.material(color, pattern, accent, shape, "blender:$name")).getOrThrow()
+                written += mat
+            }
             "texture" -> {
                 val path = "Assets/Textures/$name.txt"
                 store.writeFile(p, path, AssetKitchen.textureRecipe(name, color, pattern, accent)).getOrThrow()
@@ -1965,6 +1971,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 exportPlayer()
                 "Export/index.html"
             }
+            "blender.generate", "asset.blender" -> createAsset(
+                args.put("kind", "blender"),
+            )
             "prefab.save" -> savePrefab(args.optString("name").ifBlank { selected.orEmpty() })
             "prefab.spawn" -> {
                 val p = current(false) ?: error("no project")
