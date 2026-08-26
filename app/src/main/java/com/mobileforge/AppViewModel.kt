@@ -85,6 +85,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     var graph by mutableStateOf<com.mobileforge.engine.VisualGraph?>(null)
     val editMesh = com.mobileforge.engine.EditMesh("Sculpt")
     var meshTick by mutableStateOf(0)
+    var fileFilter by mutableStateOf("")
+    private var meshUndo: String = ""
     var graphName by mutableStateOf("Player")
     var graphSelected by mutableStateOf<String?>(null)
     var playStandalone by mutableStateOf(false)
@@ -267,7 +269,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             openProject(lastProj, navigate = false)
         }
         installCrashGuard()
-        log("MobileForge 2.10.1 — живой текст стрима, шапка не ломается")
+        log("MobileForge 2.18 — вкладки не рвут Play, физика xyz, Blender OBJ")
     }
 
 
@@ -349,7 +351,6 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun go(next: Section) {
-        if (next != Section.Play) runtime?.stop()
         section = next
         viewModelScope.launch(Dispatchers.IO) {
             runCatching {
@@ -669,6 +670,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun meshAdd(kind: String) {
+        meshUndo = editMesh.toObj()
         editMesh.addPrimitive(kind)
         meshTick++
     }
@@ -690,7 +692,32 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun meshClear() {
+        meshUndo = editMesh.toObj()
         editMesh.clear(); meshTick++
+    }
+
+    fun meshUndoLast() {
+        if (meshUndo.isBlank()) return
+        val name = editMesh.name
+        val restored = com.mobileforge.engine.EditMesh.parseObj(meshUndo, name)
+        editMesh.clear()
+        editMesh.verts.addAll(restored.verts)
+        editMesh.faces.addAll(restored.faces)
+        meshTick++
+    }
+
+    fun meshLoadFromSelected() {
+        val obj = selectedObject() ?: return notify("Выберите объект в Сцене")
+        val path = obj.asset.ifBlank { return notify("у объекта нет OBJ") }
+        val p = current(false) ?: return
+        val text = runCatching { store.resolve(p, path).readText() }.getOrNull() ?: return notify("нет $path")
+        val loaded = com.mobileforge.engine.EditMesh.parseObj(text, obj.name)
+        editMesh.clear()
+        editMesh.name = loaded.name
+        editMesh.verts.addAll(loaded.verts)
+        editMesh.faces.addAll(loaded.faces)
+        meshTick++
+        notify("загружен $path")
     }
 
     fun meshSave(): String {
@@ -996,7 +1023,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         val rt = runtime ?: return
         rt.step(dt)
         rt.input.jump = false
-        playHud = "${projectName ?: ""}  •  score ${rt.score}" +
+        playHud = "${projectName ?: ""}  •  score ${rt.score}  •  ${rt.actors.count { it.alive }} obj" +
             (rt.log.firstOrNull()?.let { "  •  $it" } ?: "")
     }
 
@@ -2087,6 +2114,25 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             "Active scene ${it.name} ${it.dimension} objects: ${it.toJson().toString().take(2500)}\n"
         }.orEmpty()
         return """
+            You are a code-only agent for MobileForge. The human is the director.
+            Do not invent gameplay, art direction or architecture beyond the order.
+            Write only code. Return complete files in fenced blocks with paths, e.g. ```Scripts/Player.cs
+            There is NO default on-screen touch UI. If the director asks for controls/joystick/buttons/HUD,
+            create UI/Controls.json:
+            {"format":"mobileforge.controls.v1","items":[{"type":"joystick","anchor":"bl","action":"move"},{"type":"button","anchor":"br","label":"Jump","action":"jump"}]}
+            Do not add touch controls unless explicitly asked.
+            Command type: ${aiCommand.name}
+            Preferred language: $aiLanguage (.cs first)
+            Event hook if relevant: $aiEvent
+            Project: ${projectName ?: "none"}
+            $sceneCtx
+            $fileCtx
+            ORDER FROM DIRECTOR:
+            $aiTask
+        """.trimIndent()
+    }
+}
+     return """
             You are a code-only agent for MobileForge. The human is the director.
             Do not invent gameplay, art direction or architecture beyond the order.
             Write only code. Return complete files in fenced blocks with paths, e.g. ```Scripts/Player.cs

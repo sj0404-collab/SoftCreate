@@ -86,18 +86,18 @@ private val Think = Color(0xFF9AA0B5)
 private val tabs = listOf(
     Section.Agent to ("✦" to "Агент"),
     Section.Projects to ("▣" to "Проекты"),
-    Section.Files to ("▤" to "Файлы"),
     Section.Studio to ("⌘" to "Сцена"),
+    Section.Play to ("▶" to "Play"),
+    Section.Blender to ("◈" to "Blender"),
+    Section.Graph to ("◎" to "Ноды"),
+    Section.Files to ("▤" to "Файлы"),
+    Section.Assets to ("◇" to "Ассеты"),
     Section.Ai to ("✎" to "Код"),
     Section.Changes to ("Δ" to "Diff"),
     Section.Plugins to ("☰" to "Плагины"),
-    Section.Assets to ("◇" to "Ассеты"),
-    Section.Play to ("▶" to "Play"),
     Section.Cloud to ("☁" to "Cloud"),
     Section.Mcp to ("⚒" to "MCP"),
     Section.Settings to ("⚙" to "Ещё"),
-    Section.Graph to ("◎" to "Ноды"),
-    Section.Blender to ("◈" to "Blender"),
 )
 
 @Composable
@@ -114,9 +114,9 @@ fun AgentScreen(vm: AppViewModel) {
     Column(Modifier.fillMaxSize().background(Bg)) {
         Column(Modifier.fillMaxWidth().background(Bar).padding(start = 12.dp, end = 12.dp, top = 10.dp, bottom = 6.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Zen", color = Teal, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+                Text("Forge", color = Teal, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.width(6.dp))
-                Text("Agent", color = Ink, fontSize = 18.sp)
+                Text(tabs.firstOrNull { it.first == vm.section }?.second?.second ?: "Studio", color = Ink, fontSize = 18.sp)
                 Spacer(Modifier.width(8.dp))
                 ModelChip(vm)
                 Spacer(Modifier.weight(1f))
@@ -190,7 +190,7 @@ private fun TabStrip(vm: AppViewModel) {
                     .clip(RoundedCornerShape(8.dp))
                     .background(if (on) Pill else Color.Transparent)
                     .clickable {
-                        if (sec == Section.Play) vm.startPlay()
+                        if (sec == Section.Play && vm.runtime?.playing != true) vm.startPlay()
                         vm.go(sec)
                     }
                     .padding(horizontal = 10.dp, vertical = 4.dp),

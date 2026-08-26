@@ -33,7 +33,8 @@ class Actor(src: SceneObject) {
 
     fun snapshot(): SceneObject = SceneObject(
         name, type, x, y, z, rx, ry, rz, sx, sy, sz, "", script, color, solid, speed, extra,
-        "Cube", "", "Directional", 1f, 60f, 0.3f, 200f, tag, "Default", alive, 1f, "", "", parent,
+        mesh.ifBlank { "Cube" }, extra.optString("material"), "Directional", 1f, 60f, 0.3f, 200f,
+        tag, layer, alive, 1f, "", "", parent,
     )
 }
 
@@ -124,7 +125,8 @@ class GameRuntime(
             applyBuiltinUpdate(actor, clamped)
         }
         physAcc += clamped
-        while (physAcc >= fixedDt) {
+        var steps = 0
+        while (physAcc >= fixedDt && steps < 5) {
             actors.filter { it.alive }.forEach { actor ->
                 call(actor, "onFixedUpdate", fixedDt)
                 fireGraphActor(actor, "onFixedUpdate", fixedDt)
@@ -132,7 +134,10 @@ class GameRuntime(
             }
             resolveCollisions()
             physAcc -= fixedDt
+            steps++
         }
+        if (physAcc > fixedDt * 2) physAcc = 0f
+        actors.filter { it.alive }.forEach { call(it, "onLateUpdate", clamped) }
         actors.removeAll { !it.alive }
     }
 
@@ -214,8 +219,7 @@ class GameRuntime(
 
     private fun applyComponents(actor: Actor, dt: Float) {
         eachComp(actor, "Rigidbody") { c ->
-            if (c.optBoolean("useGravity", true)) actor.vy -= gravity * dt
-            val drag = c.optDouble("drag", 0.05).toFloat()
+            val drag = c.optDouble("drag", 0.05).toFloat().coerceIn(0f, 0.9f)
             actor.vx *= (1f - drag)
             actor.vz *= (1f - drag)
         }
@@ -484,6 +488,10 @@ class GameRuntime(
                     "addComponent" -> ScriptInterpreter.Val.Host { args ->
                         addComponent(actor.extra, args.getOrNull(0)?.str().orEmpty())
                         ScriptInterpreter.Val.Null
+                    }
+                    "raycast" -> ScriptInterpreter.Val.Host { args ->
+                        val hit = raycast(actor, args.getOrNull(0)?.num()?.toFloat() ?: 4f, args.getOrNull(1)?.str().orEmpty())
+                        if (hit != null) actorVal(hit) else ScriptInterpreter.Val.Null
                     }
                     "emit" -> ScriptInterpreter.Val.Host { args ->
                         signals.emit(args.getOrNull(0)?.str().orEmpty()); ScriptInterpreter.Val.Null

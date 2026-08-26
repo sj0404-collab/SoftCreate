@@ -37,6 +37,9 @@ fun FilesScreen(vm: AppViewModel) {
             "Папка на телефоне:\n${vm.projectPath()}",
         )
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            listOf("" to "все", "Scripts" to "cs", "App" to "tsx", "Android" to "kt", "Blender" to "blend", "Assets" to "assets", "Export" to "export").forEach { (f, l) ->
+                MfButton(l, primary = vm.fileFilter == f) { vm.fileFilter = f }
+            }
             MfButton("Копировать путь", primary = true) { vm.copyProjectPath() }
             MfButton("＋ файл") { vm.dialog = "file"; vm.dialogValue = "Scripts/New.cs" }
         }
@@ -47,7 +50,8 @@ fun FilesScreen(vm: AppViewModel) {
         if (vm.files.isEmpty()) {
             Text("В проекте пока нет файлов.", color = MfMuted, fontSize = 14.sp)
         }
-        vm.files.groupBy { it.path.substringBeforeLast('/', ".") }.forEach { (dir, list) ->
+        val shown = vm.files.filter { vm.fileFilter.isBlank() || it.path.startsWith(vm.fileFilter) }
+        shown.groupBy { it.path.substringBeforeLast('/', ".") }.forEach { (dir, list) ->
             Text(dir, color = MfCyan, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
             list.forEach { file ->
                 val active = file.path == vm.openPath

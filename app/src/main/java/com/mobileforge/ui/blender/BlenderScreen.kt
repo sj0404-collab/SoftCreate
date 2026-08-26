@@ -122,6 +122,8 @@ fun BlenderScreen(vm: AppViewModel) {
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 MfButton("Сохранить OBJ", primary = true) { vm.meshSave() }
                 MfButton("На объект сцены") { vm.meshApplyToSelected() }
+                MfButton("Undo") { vm.meshUndoLast() }
+                MfButton("Из объекта") { vm.meshLoadFromSelected() }
             }
         }
     }
