@@ -47,7 +47,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 
-enum class Section { Agent, Projects, Files, Studio, Assets, Play, Cloud, Mcp, Ai, Settings, Changes, Plugins, Graph }
+enum class Section { Agent, Projects, Files, Studio, Assets, Play, Cloud, Mcp, Ai, Settings, Changes, Plugins, Graph, Blender }
 enum class AiCommand { Create, Change, Delete, Explain }
 
 data class ProjectItem(val name: String, val type: String)
@@ -83,6 +83,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     var runtime by mutableStateOf<GameRuntime?>(null)
     var playHud by mutableStateOf("")
     var graph by mutableStateOf<com.mobileforge.engine.VisualGraph?>(null)
+    val editMesh = com.mobileforge.engine.EditMesh("Sculpt")
+    var meshTick by mutableStateOf(0)
     var graphName by mutableStateOf("Player")
     var graphSelected by mutableStateOf<String?>(null)
     var playStandalone by mutableStateOf(false)
@@ -374,6 +376,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     reloadPlugins()
                 }
                 Section.Graph -> withContext(Dispatchers.Main) { refreshFiles() }
+                Section.Blender -> withContext(Dispatchers.Main) {
+                    if (editMesh.verts.isEmpty()) editMesh.addPrimitive("cube")
+                    meshTick++
+                    refreshFiles()
+                }
                 Section.Settings -> withContext(Dispatchers.Main) { refreshProviderFlags() }
                 Section.Cloud -> withContext(Dispatchers.Main) { refreshGithub() }
                 Section.Mcp -> withContext(Dispatchers.Main) { refreshMcp() }
@@ -659,6 +666,61 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         mutate(obj)
         if (obj.name != old) selected = obj.name
         persistScene(false)
+    }
+
+    fun meshAdd(kind: String) {
+        editMesh.addPrimitive(kind)
+        meshTick++
+    }
+
+    fun meshNudge(dx: Float, dy: Float, dz: Float) {
+        editMesh.nudge(dx, dy, dz); meshTick++
+    }
+
+    fun meshExtrude() {
+        editMesh.extrude(); meshTick++
+    }
+
+    fun meshSmooth() {
+        editMesh.smooth(); meshTick++
+    }
+
+    fun meshScale(s: Float) {
+        editMesh.scale(s); meshTick++
+    }
+
+    fun meshClear() {
+        editMesh.clear(); meshTick++
+    }
+
+    fun meshSave(): String {
+        val p = current() ?: return "ERROR: нет проекта"
+        if (editMesh.verts.isEmpty()) return "ERROR: пустая сетка"
+        val path = "Assets/Meshes/${ProjectStore.sanitizeName(editMesh.name)}.obj"
+        store.writeFile(p, path, editMesh.toObj()).getOrThrow()
+        refreshFiles()
+        notify("OBJ $path")
+        return path
+    }
+
+    fun meshApplyToSelected(): String {
+        val obj = selectedObject() ?: return "ERROR: выберите объект в Сцене"
+        val path = meshSave()
+        if (path.startsWith("ERROR")) return path
+        obj.asset = path
+        obj.mesh = editMesh.toSceneMesh()
+        persistScene(true)
+        notify("меш на ${obj.name}")
+        return "applied $path → ${obj.name}"
+    }
+
+    fun meshFromAi(kind: String, name: String, color: String): String {
+        editMesh.clear()
+        editMesh.name = name.ifBlank { kind }
+        editMesh.color = color.ifBlank { "#8ab4ff" }
+        editMesh.addPrimitive(kind.ifBlank { "cube" })
+        meshTick++
+        return meshSave()
     }
 
     fun newPlayerGraph() {
@@ -1971,9 +2033,17 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 exportPlayer()
                 "Export/index.html"
             }
-            "blender.generate", "asset.blender" -> createAsset(
-                args.put("kind", "blender"),
-            )
+            "blender.generate", "asset.blender", "mesh.add" -> {
+                val n = args.optString("name").ifBlank { "Sculpt" }
+                val shape = args.optString("shape").ifBlank { args.optString("kind").ifBlank { "cube" } }
+                if (shape == "blender") {
+                    createAsset(args.put("kind", "blender"))
+                }
+                meshFromAi(shape, n, args.optString("color", "#8ab4ff"))
+            }
+            "mesh.save" -> meshSave()
+            "mesh.apply" -> meshApplyToSelected()
+            "mesh.clear" -> { meshClear(); "cleared" }
             "prefab.save" -> savePrefab(args.optString("name").ifBlank { selected.orEmpty() })
             "prefab.spawn" -> {
                 val p = current(false) ?: error("no project")
@@ -2006,6 +2076,36 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun current(alert: Boolean = true): ProjectStore.Project? =
+        projectName?.let { store.find(it) } ?: run {
+            if (alert && section != Section.Projects) notify("Сначала откройте проект")
+            null
+        }
+
+    private fun buildPrompt(): String {
+        val fileCtx = openPath?.let { "Active file: $it\n```\n${editorText.take(4000)}\n```\n" }.orEmpty()
+        val sceneCtx = scene?.let {
+            "Active scene ${it.name} ${it.dimension} objects: ${it.toJson().toString().take(2500)}\n"
+        }.orEmpty()
+        return """
+            You are a code-only agent for MobileForge. The human is the director.
+            Do not invent gameplay, art direction or architecture beyond the order.
+            Write only code. Return complete files in fenced blocks with paths, e.g. ```Scripts/Player.cs
+            There is NO default on-screen touch UI. If the director asks for controls/joystick/buttons/HUD,
+            create UI/Controls.json:
+            {"format":"mobileforge.controls.v1","items":[{"type":"joystick","anchor":"bl","action":"move"},{"type":"button","anchor":"br","label":"Jump","action":"jump"}]}
+            Do not add touch controls unless explicitly asked.
+            Command type: ${aiCommand.name}
+            Preferred language: $aiLanguage (.cs first)
+            Event hook if relevant: $aiEvent
+            Project: ${projectName ?: "none"}
+            $sceneCtx
+            $fileCtx
+            ORDER FROM DIRECTOR:
+            $aiTask
+        """.trimIndent()
+    }
+}
+t? =
         projectName?.let { store.find(it) } ?: run {
             if (alert && section != Section.Projects) notify("Сначала откройте проект")
             null

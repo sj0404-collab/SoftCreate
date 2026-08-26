@@ -97,6 +97,7 @@ private val tabs = listOf(
     Section.Mcp to ("⚒" to "MCP"),
     Section.Settings to ("⚙" to "Ещё"),
     Section.Graph to ("◎" to "Ноды"),
+    Section.Blender to ("◈" to "Blender"),
 )
 
 @Composable
@@ -162,6 +163,7 @@ fun AgentScreen(vm: AppViewModel) {
                 Section.Mcp -> McpScreen(vm)
                 Section.Settings -> SettingsScreen(vm)
                 Section.Graph -> com.mobileforge.ui.graph.GraphScreen(vm)
+                Section.Blender -> com.mobileforge.ui.blender.BlenderScreen(vm)
             }
         }
         if (vm.section == Section.Agent) InputBar(vm)

@@ -243,7 +243,7 @@ object AgentParser {
 - Анимации — только если просили (слово «анимации» в заказе = просили: сделай через скрипт api, без твинов движка если нет инструмента).
 - Джойстик/HUD — только если просили.
 - Play-скрипты сцены: Scripts/*.cs (ForgeBehaviour) или ноды. Остальные языки ПИШИ куда нужно: App/*.tsx, Android/*.kt|java, Android/smali/*.smali, Config/*.yml, Blender/*.py, Native/*.cpp, Web/*.html. Не клади TSX/Java в Scripts/ — агент перенесёт в свою папку.
-- Blender: blender.generate / asset.create kind=blender → Blender/Имя.py (запуск в десктопном Blender) + OBJ/материал в сцену.
+- Blender в приложении (вкладка Blender): mesh.add / blender.generate {name,shape,color} — сетка в редакторе, OBJ в Assets/Meshes. mesh.save, mesh.apply на объект сцены. Десктопный .py по желанию.
 - Делай всё, что нужно заказу: код, меши, графы, github, экспорт. Не выдумывай вредоносный smali/эксплойты.
 - scene.list перед тем как плодить дубликаты. Не копируй Player/Ground без нужды.
 - project.seed_demo только если просили демо SkyRunner.

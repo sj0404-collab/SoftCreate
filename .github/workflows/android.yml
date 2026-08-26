@@ -44,10 +44,10 @@ jobs:
         run: |
           mkdir -p dist
           DEBUG_APK=$(ls app/build/outputs/apk/debug/*.apk | head -1)
-          cp "$DEBUG_APK" dist/MobileForge-2.16.1-debug.apk
+          cp "$DEBUG_APK" dist/MobileForge-2.17.0-debug.apk
           if ls app/build/outputs/apk/release/*.apk >/dev/null 2>&1; then
             REL_APK=$(ls app/build/outputs/apk/release/*.apk | head -1)
-            cp "$REL_APK" dist/MobileForge-2.16.1-release.apk
+            cp "$REL_APK" dist/MobileForge-2.17.0-release.apk
           fi
           ls -lh dist
           python3 - <<'PY'
@@ -66,14 +66,14 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: MobileForge-2.16.1
+          name: MobileForge-2.17.0
           path: dist/*.apk
       - name: GitHub Release
         if: github.event_name != 'pull_request'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v2.16.1
-          name: MobileForge 2.16.1
+          tag_name: v2.17.0
+          name: MobileForge 2.17.0
           fail_on_unmatched_files: false
           files: dist/*.apk
           body: |
