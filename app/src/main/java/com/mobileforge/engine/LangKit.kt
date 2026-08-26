@@ -77,7 +77,7 @@ object LangKit {
         mat = bpy.data.materials.new(name="${name}_mat")
         mat.use_nodes = True
         bsdf = mat.node_tree.nodes.get("Principled BSDF")
-        hexcol = "${color.lstrip('#')}"
+        hexcol = "${color.removePrefix("#")}"
         if len(hexcol) >= 6 and bsdf:
             r = int(hexcol[0:2], 16) / 255
             g = int(hexcol[2:4], 16) / 255
